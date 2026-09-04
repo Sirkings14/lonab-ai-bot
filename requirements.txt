@@ -1,0 +1,6 @@
+pdfplumber
+   beautifulsoup4
+   pandas
+   numpy
+   scikit-learn
+   requests
