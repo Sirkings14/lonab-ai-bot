@@ -17,6 +17,7 @@ URL_RESULTS = "https://lonab.bf/resultats-et-rapports"
 LOCAL_PDF_PATH = "todays_active_program.pdf"
 HISTORICAL_DB_PATH = "real_history_db.csv"
 
+
 def send_telegram_message(message):
     """Sends prediction results or updates directly to your Telegram chat."""
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
@@ -34,10 +35,11 @@ def send_telegram_message(message):
         res = requests.post(url, json=payload)
         if res.status_code == 200:
             print("📱 Telegram message sent successfully!")
-            else:
+        else:
             print(f"❌ Telegram Error: {res.text}")
     except Exception as e:
         print(f"❌ Telegram Connection Error: {e}")
+
 
 def load_real_dataset():
     """Loads the real historical database from GitHub repository."""
@@ -45,9 +47,9 @@ def load_real_dataset():
         df = pd.read_csv(HISTORICAL_DB_PATH)
         print(f"✔️ Loaded {len(df)} real historical race records.")
         return df
-    else:
-        print("❌ Error: real_history_db.csv not found in repository.")
-        return None
+    print("❌ Error: real_history_db.csv not found in repository.")
+    return None
+
 
 def run_predictions():
     print("=== MORNING WORKFLOW: GENERATING PREDICTIONS ===")
@@ -78,7 +80,10 @@ def run_predictions():
             if text:
                 full_text += "\n" + text
 
-    runner_pattern = re.compile(r'^\s*(\d{1,2})\s*[-–.]?\s*([A-Z\s\']{3,25})\s*:\s*(.*)$', re.MULTILINE)
+    runner_pattern = re.compile(
+        r'^\s*(\d{1,2})\s*[-–.]?\s*([A-Z\s\']{3,25})\s*:\s*(.*)$',
+        re.MULTILINE
+    )
     matches = runner_pattern.findall(full_text)
     extracted_runners = []
 
@@ -127,13 +132,29 @@ def run_predictions():
     processed_today = []
     for idx, row in todays_df.iterrows():
         comment = str(row.get("Comment", "")).lower()
-        
-        # Shoe status parsing: Barefoot (D4) = highest boost
-        shoe = 2 if ("d4" in comment or "déferré des 4" in comment) else (1 if ("dp" in comment or "da" in comment or "déferré" in comment) else 0)
-        processed_today.append([np.log1p(25000.0), 5.0, shoe, np.random.choice([1.0, 2.0, 3.0]), np.random.choice([1.0, 2.0, 3.0]), 20.0, 0.1 if "da" in comment else 0.05])
+        if "d4" in comment or "déferré des 4" in comment:
+            shoe = 2
+        elif "dp" in comment or "da" in comment or "déferré" in comment:
+            shoe = 1
+        else:
+            shoe = 0
 
-    X_today = pd.DataFrame(processed_today, columns=["Earnings", "Age", "Shoe_Status", "Driver_Rank", "Trainer_Rank", "Days_Rest", "DQ_Rate"], dtype=np.float64)
-todays_df["Prob"] = np.round(model.predict_proba(X_today)[:, 1] * 100, 1)
+        processed_today.append([
+            np.log1p(25000.0),
+            5.0,
+            shoe,
+            np.random.choice([1.0, 2.0, 3.0]),
+            np.random.choice([1.0, 2.0, 3.0]),
+            20.0,
+            0.1 if "da" in comment else 0.05
+        ])
+
+    X_today = pd.DataFrame(
+        processed_today,
+        columns=["Earnings", "Age", "Shoe_Status", "Driver_Rank", "Trainer_Rank", "Days_Rest", "DQ_Rate"],
+        dtype=np.float64
+    )
+    todays_df["Prob"] = np.round(model.predict_proba(X_today)[:, 1] * 100, 1)
     todays_df = todays_df.sort_values(by="Prob", ascending=False)
 
     # Save today's parsed data locally for evening result matching
@@ -154,6 +175,7 @@ todays_df["Prob"] = np.round(model.predict_proba(X_today)[:, 1] * 100, 1)
 
     send_telegram_message(msg)
 
+
 def collect_daily_results():
     print("=== EVENING WORKFLOW: SCRAPING OFFICIAL RESULTS ===")
     if not os.path.exists("todays_active_runners.csv"):
@@ -165,7 +187,7 @@ def collect_daily_results():
         res = requests.get(URL_RESULTS, headers=headers)
         soup = BeautifulSoup(res.text, "html.parser")
         text_content = soup.get_text()
-        
+
         arrival_match = re.search(r'(?:Arrivée|ARRIVEE)\s*:?\s*([\d\s\-–]+)', text_content)
         if not arrival_match:
             print("⚠️ Official results not yet published on LONAB.")
@@ -186,8 +208,13 @@ def collect_daily_results():
                 num = horse_num_match.group(1)
                 is_win = 1 if num in winning_numbers else 0
                 comment = str(row.get("Comment", "")).lower()
-                shoe = 2 if ("d4" in comment or "déferré des 4" in comment) else (1 if ("dp" in comment or "da" in comment or "déferré" in comment) else 0)
-                
+                if "d4" in comment or "déferré des 4" in comment:
+                    shoe = 2
+                elif "dp" in comment or "da" in comment or "déferré" in comment:
+                    shoe = 1
+                else:
+                    shoe = 0
+
                 new_records.append({
                     "Earnings": 25000.0,
                     "Age": 5.0,
@@ -202,18 +229,20 @@ def collect_daily_results():
         if new_records:
             new_df = pd.DataFrame(new_records)
             db = load_real_dataset()
-            updated_db = pd.concat([db, new_df], ignore_index=True)
-            updated_db.to_csv(HISTORICAL_DB_PATH, index=False)
-            
-            print(f"✔️ Added {len(new_records)} real outcomes to historical database!")
-            
-            msg = f"📊 *LONAB AI AUTO-LEARNING UPDATE*\n\n"
-            msg += f"🏁 *Official Arrivée:* `{' - '.join(winning_numbers)}`\n"
-            msg += f"🧠 Added today's race to AI memory. Total historical database size: *{len(updated_db)} records*."
-            send_telegram_message(msg)
+            if db is not None:
+                updated_db = pd.concat([db, new_df], ignore_index=True)
+                updated_db.to_csv(HISTORICAL_DB_PATH, index=False)
+
+                print(f"✔️ Added {len(new_records)} real outcomes to historical database!")
+
+                msg = f"📊 *LONAB AI AUTO-LEARNING UPDATE*\n\n"
+                msg += f"🏁 *Official Arrivée:* `{' - '.join(winning_numbers)}`\n"
+                msg += f"🧠 Added today's race to AI memory. Total historical database size: *{len(updated_db)} records*."
+                send_telegram_message(msg)
 
     except Exception as e:
         print(f"❌ Error collecting results: {e}")
+
 
 if __name__ == "__main__":
     import sys
@@ -221,65 +250,3 @@ if __name__ == "__main__":
         collect_daily_results()
     else:
         run_predictions()
-```
-
-3. Scroll down and click **Commit changes...**.
-
----
-
-### Step 3: Update the Workflow Scheduler (`.github/workflows/daily_pmu.yml`)
-
-1. Open `.github/workflows/daily_pmu.yml` in GitHub, click the **pencil icon (Edit)**.
-2. Replace its contents with this complete dual-schedule code:
-
-```yaml
-name: Daily LONAB AI Prediction & Auto-Learning Bot
-
-on:
-  schedule:
-    # Morning Predictions at 10:00 AM UTC
-    - cron: '0 10 * * *'
-    # Evening Auto-Learning at 18:00 PM UTC
-    - cron: '0 18 * * *'
-  workflow_dispatch:
-
-jobs:
-  run-pipe
-  line:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v3
-
-      - name: Set up Python 3.10
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.10'
-
-      - name: Install Dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-
-      - name: Run Morning Predictions
-        if: github.event.schedule == '0 10 * * *' || github.event_name == 'workflow_dispatch'
-        env:
-          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python main.py
-
-      - name: Run Evening Auto-Learning
-        if: github.event.schedule == '0 18 * * *'
-        env:
-          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python main.py --evening
-
-      - name: Commit & Save Learning Memory to GitHub
-        if: github.event.schedule == '0 18 * * *'
-        run: |
-          git config --global user.name "LONAB AI Bot"
-          git config --global user.email "bot@lonab-ai.com"
-          git add real_history_db.csv
-          git commit -m "Updated AI learning database with daily results [skip ci]" || exit 0
-          git push
