@@ -1,6 +1,7 @@
+requests
+beautifulsoup4
+pandas
+numpy
 pdfplumber
-   beautifulsoup4
-   pandas
-   numpy
-   scikit-learn
-   requests
+scikit-learn
+lightgbm
