@@ -72,13 +72,12 @@ def parse_rest_days(comment_text):
     return 21.0
 
 
-def parse_market_odds(comment_text):
+def parse_raw_odds(comment_text):
     match = re.search(r'\b(\d{1,3})/1\b', comment_text)
     if match:
-        odds = float(match.group(1))
-        if odds > 0:
-            return round(1.0 / (odds + 1.0), 3)
-    return 0.05
+        fractional = float(match.group(1))
+        return fractional + 1.0
+    return 10.0
 
 
 def parse_autostart_position(horse_num, full_text):
@@ -114,8 +113,20 @@ def softmax_probabilities(logits, temperature=1.0):
     return exp_scores / np.sum(exp_scores)
 
 
+def calculate_kelly_stake(ai_prob, decimal_odds, fraction=0.25):
+    p = ai_prob
+    b = decimal_odds - 1.0
+    if b <= 0 or p <= 0:
+        return 0.0
+    kelly_f = ((p * b) - (1.0 - p)) / b
+    if kelly_f <= 0:
+        return 0.0
+    recommended_stake = min(kelly_f * fraction * 100, 5.0)
+    return round(recommended_stake, 2)
+
+
 def run_predictions():
-    print("=== MORNING WORKFLOW: ENSEMBLE AI PREDICTIONS ===")
+    print("=== MORNING WORKFLOW: QUANTITATIVE KELLY AI PREDICTIONS ===")
     headers = {"User-Agent": "Mozilla/5.0"}
     response = requests.get(URL_PROGRAMS, headers=headers)
     soup = BeautifulSoup(response.text, "html.parser")
@@ -208,6 +219,8 @@ def run_predictions():
     lgb_model.fit(X, y)
 
     processed_today = []
+    decimal_odds_list = []
+
     for idx, row in todays_df.iterrows():
         comment = str(row.get("Comment", "")).lower()
         
@@ -217,7 +230,11 @@ def run_predictions():
         speed_idx = parse_chrono_speed(comment)
         days_rest = parse_rest_days(comment)
         autostart_pos = parse_autostart_position(row["Num"], full_text)
-        market_prob = parse_market_odds(comment)
+        
+        dec_odds = parse_raw_odds(comment)
+        decimal_odds_list.append(dec_odds)
+        market_prob = round(1.0 / dec_odds, 3) if dec_odds > 0 else 0.05
+        
         dq_rate = 0.2 if "da" in comment or "disqualification" in comment else 0.05
         earnings = np.log1p(25000.0)
         age = 5.0
@@ -234,9 +251,29 @@ def run_predictions():
     raw_ensemble_scores = (0.50 * rf_probs) + (0.50 * lgb_probs)
 
     calibrated_probs = softmax_probabilities(raw_ensemble_scores, temperature=1.0)
+    
+    todays_df["Prob_Val"] = calibrated_probs
     todays_df["Prob"] = np.round(calibrated_probs * 100, 1)
-    todays_df = todays_df.sort_values(by="Prob", ascending=False)
+    todays_df["Odds"] = decimal_odds_list
+    
+    kelly_stakes = []
+    is_value_list = []
+    
+    for idx, r in todays_df.iterrows():
+        ai_p = r["Prob_Val"]
+        odds = r["Odds"]
+        market_p = 1.0 / odds if odds > 0 else 0.05
+        
+        stake = calculate_kelly_stake(ai_p, odds, fraction=0.25)
+        kelly_stakes.append(stake)
+        
+        is_value = (ai_p > (market_p * 1.25)) and stake > 0
+        is_value_list.append(is_value)
 
+    todays_df["Kelly_Stake"] = kelly_stakes
+    todays_df["Is_Value"] = is_value_list
+    
+    todays_df = todays_df.sort_values(by="Prob", ascending=False)
     todays_df.to_csv("todays_active_runners.csv", index=False)
 
     top_list = todays_df["Horse"].tolist()
@@ -244,14 +281,25 @@ def run_predictions():
     top_4 = " - ".join(top_list[:4])
     top_5 = " - ".join(top_list[:5])
 
-    msg = f"🐎 *ENSEMBLE LONAB AI PREDICTIONS* 🐎\n"
+    msg = f"🐎 *QUANT LONAB AI PREDICTIONS* 🐎\n"
     msg += f"📏 *Distance:* `{int(race_distance)}m` | 🧠 *Engine:* `RF + LightGBM`\n\n"
     msg += f"🥇 *TOP 3 (TIERCÉ):*\n`{top_3}`\n\n"
     msg += f"🥈 *TOP 4 (QUARTÉ):*\n`{top_4}`\n\n"
     msg += f"🥉 *TOP 5 (QUINTÉ):*\n`{top_5}`\n\n"
-    msg += "📊 *Field Probability Distribution:*\n"
+    
+    value_bets = todays_df[todays_df["Is_Value"] == True]
+    if not value_bets.empty:
+        msg += "🔥 *VALUE OVERLAY BETS IDENTIFIED:*\n"
+        for _, v in value_bets.iterrows():
+            msg += f"• *{v['Horse']}* | Odds: `{v['Odds']}x` | AI Prob: *{v['Prob']}%* | 💰 Stake: `{v['Kelly_Stake']}% Bankroll`\n"
+        msg += "\n"
+    else:
+        msg += "💡 *Market Value Check:* No major market mispricings detected today.\n\n"
+
+    msg += "📊 *Full Probabilities & Kelly Allocations:*\n"
     for _, r in todays_df.head(8).iterrows():
-        msg += f"• {r['Horse']} ({r['Driver']}): *{r['Prob']}%*\n"
+        stake_str = f" | Stake: `{r['Kelly_Stake']}%`" if r['Kelly_Stake'] > 0 else ""
+        msg += f"• {r['Horse']} ({r['Driver']}): *{r['Prob']}%*{stake_str}\n"
 
     send_telegram_message(msg)
 
@@ -291,6 +339,8 @@ def collect_daily_results():
                 shoe = 2 if ("d4" in comment or "déferré des 4" in comment) else (1 if ("dp" in comment or "da" in comment or "déferré" in comment) else 0)
                 driver_rank = get_person_rank(row.get("Driver", ""), "Driver")
                 trainer_rank = get_person_rank(row.get("Trainer", ""), "Trainer")
+                dec_odds = parse_raw_odds(comment)
+                market_prob = round(1.0 / dec_odds, 3) if dec_odds > 0 else 0.05
 
                 new_records.append({
                     "Earnings": 25000.0,
@@ -302,7 +352,7 @@ def collect_daily_results():
                     "DQ_Rate": 0.2 if "da" in comment or "disqualification" in comment else 0.05,
                     "Speed_Index": parse_chrono_speed(comment),
                     "Autostart_Pos": parse_autostart_position(num, comment),
-                    "Market_Prob": parse_market_odds(comment),
+                    "Market_Prob": market_prob,
                     "Is_Winner": is_win
                 })
 
