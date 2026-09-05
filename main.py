@@ -250,7 +250,7 @@ def run_predictions():
     lgb_probs = lgb_model.predict_proba(X_today)[:, 1]
     raw_ensemble_scores = (0.50 * rf_probs) + (0.50 * lgb_probs)
 
-    calibrated_probs = softmax_probabilities(raw_ensemble_scores, temperature=1.0)
+    calibrated_probs = softmax_probabilities(raw_ensemble_scores, temperature=0.35)
     
     todays_df["Prob_Val"] = calibrated_probs
     todays_df["Prob"] = np.round(calibrated_probs * 100, 1)
