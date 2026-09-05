@@ -54,7 +54,7 @@ def get_person_rank(name, role="Driver"):
             return float(match.iloc[0]["Skill_Rank"])
     except Exception:
         pass
-    return 1.5  # Standard baseline rank for unknown competitors
+    return 1.5
 
 
 def parse_chrono_speed(comment_text):
@@ -64,16 +64,51 @@ def parse_chrono_speed(comment_text):
         seconds = float(match.group(1))
         tenths = float(match.group(2)) / 10.0
         return seconds + tenths
-    return 13.0  # Average default speed index
+    return 13.0
 
 
 def parse_rest_days(comment_text):
-    """Parses fitness & recency from comment text or past performance."""
+    """Parses fitness & recency from comment text."""
     if "rentrée" in comment_text.lower() or "absent" in comment_text.lower():
-        return 60.0  # Returning from long break (Red flag)
+        return 60.0
     elif "récent" in comment_text.lower() or "en forme" in comment_text.lower():
-        return 14.0  # Peak freshness
-    return 21.0  # Standard rest window
+        return 14.0
+    return 21.0
+
+
+def parse_market_odds(comment_text):
+    """Parses morning betting odds (e.g., 5/1 or 12/1) into market probability."""
+    match = re.search(r'\b(\d{1,3})/1\b', comment_text)
+    if match:
+        odds = float(match.group(1))
+        if odds > 0:
+            # Implied win probability from fractional odds: 1 / (odds + 1)
+            return round(1.0 / (odds + 1.0), 3)
+    return 0.05  # Standard baseline implied probability (20/1 equivalent)
+
+
+def parse_autostart_position(horse_num, full_text):
+    """Determines starting position advantage if race uses Autostart gate."""
+    is_autostart = "autostart" in full_text.lower() or "a l'attele" in full_text.lower()
+    if is_autostart:
+        try:
+            num = int(horse_num)
+            if 1 <= num <= 8:
+                return 1  # Front row advantage
+            else:
+                return 0  # Back row handicap
+        except ValueError:
+            pass
+    return 1  # Standard start default
+
+
+def parse_race_distance(full_text):
+    """Extracts race distance in meters from PDF header."""
+    match = re.search(r'(\d{1}\s*\d{3})\s*METRES', full_text, re.IGNORECASE)
+    if match:
+        dist_str = match.group(1).replace(" ", "")
+        return float(dist_str)
+    return 2700.0
 
 
 def load_real_dataset():
@@ -87,7 +122,7 @@ def load_real_dataset():
 
 
 def run_predictions():
-    print("=== MORNING WORKFLOW: PRO AI PREDICTIONS ===")
+    print("=== MORNING WORKFLOW: GRANDMASTER AI PREDICTIONS ===")
     headers = {"User-Agent": "Mozilla/5.0"}
     response = requests.get(URL_PROGRAMS, headers=headers)
     soup = BeautifulSoup(response.text, "html.parser")
@@ -115,6 +150,10 @@ def run_predictions():
             if text:
                 full_text += "\n" + text
 
+    # Extract macro race parameters
+    race_distance = parse_race_distance(full_text)
+    print(f"-> Race Distance Extracted: {race_distance}m")
+
     runner_pattern = re.compile(
         r'^\s*(\d{1,2})\s*[-–.]?\s*([A-Z\s\']{3,25})\s*:\s*(.*)$',
         re.MULTILINE
@@ -134,6 +173,7 @@ def run_predictions():
             trainer = trainer_match.group(1).upper() if trainer_match else "Unknown Trainer"
 
             extracted_runners.append({
+                "Num": num,
                 "Horse": f"{num} - {clean_name}",
                 "Driver": driver,
                 "Trainer": trainer,
@@ -147,6 +187,7 @@ def run_predictions():
                 num, name = m.group(1), m.group(2).strip()
                 if not any(hw in name for hw in ["MEILLEURS", "SEMAINE", "ARRIVEE", "PRIX", "COURSE"]):
                     extracted_runners.append({
+                        "Num": num,
                         "Horse": f"{num} - {name}",
                         "Driver": "Assigned Pilot",
                         "Trainer": "Unknown Trainer",
@@ -159,35 +200,42 @@ def run_predictions():
 
     todays_df = pd.DataFrame(extracted_runners)
 
-    # Load REAL dataset and train ML model
+    # Load REAL dataset and train Grandmaster ML model
     db = load_real_dataset()
     if db is None:
         send_telegram_message("❌ *LONAB AI Error:* Missing real historical database.")
         return
 
-    # Advanced Feature Set
-    X = db[["Earnings", "Age", "Shoe_Status", "Driver_Rank", "Trainer_Rank", "Days_Rest", "DQ_Rate", "Speed_Index"]]
+    # Complete 10-Feature Matrix
+    X = db[["Earnings", "Age", "Shoe_Status", "Driver_Rank", "Trainer_Rank", "Days_Rest", "DQ_Rate", "Speed_Index", "Autostart_Pos", "Market_Prob"]]
     y = db["Is_Winner"]
     
-    model = RandomForestClassifier(n_estimators=200, random_state=42, max_depth=10)
+    # 250-Tree Random Forest Classifier
+    model = RandomForestClassifier(n_estimators=250, random_state=42, max_depth=12)
     model.fit(X, y)
 
     processed_today = []
     for idx, row in todays_df.iterrows():
         comment = str(row.get("Comment", "")).lower()
         
-        # Pro Feature 1: Shoe Status (D4 Barefoot)
+        # 1. Barefoot Shoe Status
         shoe = 2 if ("d4" in comment or "déferré des 4" in comment) else (1 if ("dp" in comment or "da" in comment or "déferré" in comment) else 0)
         
-        # Pro Feature 2: Driver & Trainer Real Skill Lookup
+        # 2. Driver & Trainer Skill Ranks
         driver_rank = get_person_rank(row["Driver"], "Driver")
         trainer_rank = get_person_rank(row["Trainer"], "Trainer")
         
-        # Pro Feature 3: Speed Index (Chrono)
+        # 3. Speed Index (Chrono)
         speed_idx = parse_chrono_speed(comment)
         
-        # Pro Feature 4: Fitness & Recency
+        # 4. Fitness & Recency
         days_rest = parse_rest_days(comment)
+        
+        # 5. Autostart Position
+        autostart_pos = parse_autostart_position(row["Num"], full_text)
+        
+        # 6. Market Consensus Probability
+        market_prob = parse_market_odds(comment)
         
         dq_rate = 0.2 if "da" in comment or "disqualification" in comment else 0.05
         earnings = np.log1p(25000.0)
@@ -201,12 +249,14 @@ def run_predictions():
             trainer_rank,
             days_rest,
             dq_rate,
-            speed_idx
+            speed_idx,
+            autostart_pos,
+            market_prob
         ])
 
     X_today = pd.DataFrame(
         processed_today,
-        columns=["Earnings", "Age", "Shoe_Status", "Driver_Rank", "Trainer_Rank", "Days_Rest", "DQ_Rate", "Speed_Index"],
+        columns=["Earnings", "Age", "Shoe_Status", "Driver_Rank", "Trainer_Rank", "Days_Rest", "DQ_Rate", "Speed_Index", "Autostart_Pos", "Market_Prob"],
         dtype=np.float64
     )
     
@@ -220,11 +270,12 @@ def run_predictions():
     top_4 = " - ".join(top_list[:4])
     top_5 = " - ".join(top_list[:5])
 
-    msg = f"🐎 *PRO LONAB AI PREDICTIONS* 🐎\n\n"
+    msg = f"🐎 *GRANDMASTER LONAB AI PREDICTIONS* 🐎\n"
+    msg += f"📏 *Distance:* `{int(race_distance)}m`\n\n"
     msg += f"🥇 *TOP 3 (TIERCÉ):*\n`{top_3}`\n\n"
     msg += f"🥈 *TOP 4 (QUARTÉ):*\n`{top_4}`\n\n"
     msg += f"🥉 *TOP 5 (QUINTÉ):*\n`{top_5}`\n\n"
-    msg += "📊 *Full Machine Rankings:*\n"
+    msg += "📊 *Full Probabilities:*\n"
     for _, r in todays_df.head(8).iterrows():
         msg += f"• {r['Horse']} ({r['Driver']}): *{r['Prob']}%*\n"
 
@@ -276,6 +327,8 @@ def collect_daily_results():
                     "Days_Rest": parse_rest_days(comment),
                     "DQ_Rate": 0.2 if "da" in comment or "disqualification" in comment else 0.05,
                     "Speed_Index": parse_chrono_speed(comment),
+                    "Autostart_Pos": parse_autostart_position(num, comment),
+                    "Market_Prob": parse_market_odds(comment),
                     "Is_Winner": is_win
                 })
 
@@ -290,7 +343,7 @@ def collect_daily_results():
 
                 msg = f"📊 *LONAB AI AUTO-LEARNING UPDATE*\n\n"
                 msg += f"🏁 *Official Arrivée:* `{' - '.join(winning_numbers)}`\n"
-                msg += f"🧠 Memory updated with real Pro features. Database size: *{len(updated_db)} records*."
+                msg += f"🧠 Added today's 10-feature race matrix to AI memory. Database size: *{len(updated_db)} records*."
                 send_telegram_message(msg)
 
     except Exception as e:
