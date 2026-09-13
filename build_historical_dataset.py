@@ -187,20 +187,35 @@ def backfill(days_back=60):
         time.sleep(0.3)  # polite pacing
 
     print(f"Found {len(program_texts)} programs and {len(recaps_found)} embedded recaps.")
+    print(f"Program dates available: {sorted(program_texts.keys())}")
+    print(f"Recap dates needed:      {sorted(recaps_found.keys())}")
+    missing = sorted(set(recaps_found.keys()) - set(program_texts.keys()))
+    if missing:
+        print(f"Recap dates with NO matching program fetched: {missing}")
 
     new_rows = []
     newly_labeled_dates = []
+    skipped_already_seen = []
+    skipped_no_program = []
     for date_key, top5 in recaps_found.items():
         if date_key in seen_dates:
+            skipped_already_seen.append(date_key)
             continue
         if date_key not in program_texts:
+            skipped_no_program.append(date_key)
             continue  # have the result, but not that day's own program text
         df = build_todays_dataframe(program_texts[date_key])
         if df is None or df.empty:
+            print(f"  {date_key}: program text found but failed to parse into rows")
             continue
         df["Is_Winner"] = df["Num"].apply(lambda n: 1 if n in top5 else 0)
         new_rows.append(df[FEATURE_COLS + ["Is_Winner"]])
         newly_labeled_dates.append(date_key)
+
+    if skipped_already_seen:
+        print(f"Skipped (already backfilled): {skipped_already_seen}")
+    if skipped_no_program:
+        print(f"Skipped (no matching program fetched): {skipped_no_program}")
 
     if new_rows:
         combined_new = pd.concat(new_rows, ignore_index=True)
