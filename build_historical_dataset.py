@@ -72,6 +72,37 @@ def fetch_pdf_text(url, headers):
     return full_text
 
 
+FR_MONTHS = {
+    'JANVIER': '01', 'FEVRIER': '02', 'FÉVRIER': '02', 'MARS': '03', 'AVRIL': '04',
+    'MAI': '05', 'JUIN': '06', 'JUILLET': '07', 'AOUT': '08', 'AOÛT': '08',
+    'SEPTEMBRE': '09', 'OCTOBRE': '10', 'NOVEMBRE': '11', 'DECEMBRE': '12', 'DÉCEMBRE': '12',
+}
+
+HEADER_DATE_RE = re.compile(
+    r'"?4\+1"?\s+DU\s+\w+\s+(\d{1,2})\s+([A-ZÉÛ]+)\s+(\d{4})', re.IGNORECASE
+)
+
+
+def extract_program_own_date(full_text):
+    """
+    Reads the program's own date from its printed header, e.g.
+    '"4+1" DU DIMANCHE 06 SEPTEMBRE 2026' -> '06-09-2026'.
+    This is far more reliable than the URL filename, which LONAB
+    formats inconsistently (hyphens vs underscores, encoding bugs).
+    Returns 'DD-MM-YYYY' or None.
+    """
+    m = HEADER_DATE_RE.search(full_text)
+    if not m:
+        return None
+    dd = m.group(1).zfill(2)
+    month_name = m.group(2).upper()
+    mm = FR_MONTHS.get(month_name)
+    if not mm:
+        return None
+    yyyy = m.group(3)
+    return f"{dd}-{mm}-{yyyy}"
+
+
 def extract_embedded_recap(full_text):
     """Returns (date_str 'DD-MM-YYYY', [top5 horse numbers as zero-padded strings]) or None."""
     m = RECAP_RE.search(full_text)
@@ -139,10 +170,12 @@ def backfill(days_back=60):
         except Exception:
             continue  # 404s expected for guessed dates; skip quietly
 
-        date_key = None
-        mm_date = re.search(r'JH_PMUB_DU[_-](\d{2})-(\d{2})-(\d{4})', url)
-        if mm_date:
-            date_key = f"{mm_date.group(1)}-{mm_date.group(2)}-{mm_date.group(3)}"
+        date_key = extract_program_own_date(text)
+        if not date_key:
+            # Fallback for the rare case the header text didn't extract cleanly
+            mm_date = re.search(r'JH_PMU\S*?B?_DU[_-](\d{2})-(\d{2})-(\d{4})', url)
+            if mm_date:
+                date_key = f"{mm_date.group(1)}-{mm_date.group(2)}-{mm_date.group(3)}"
         if date_key:
             program_texts[date_key] = text
 
