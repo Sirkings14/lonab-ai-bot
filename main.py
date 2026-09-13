@@ -9,7 +9,7 @@ import pdfplumber
 from sklearn.ensemble import RandomForestClassifier
 from lightgbm import LGBMClassifier
 
-from pdf_parser import parse_race_card, extract_horse_comments, chrono_to_speed_index
+from pdf_parser import parse_race_card, extract_horse_comments, chrono_to_speed_index, detect_discipline
 
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
@@ -22,7 +22,8 @@ STATS_DB_PATH = "driver_trainer_stats.csv"
 
 FEATURE_COLS = [
     "Earnings", "Age", "Shoe_Status", "Driver_Rank", "Trainer_Rank",
-    "Days_Rest", "DQ_Rate", "Speed_Index", "Autostart_Pos", "Market_Prob"
+    "Days_Rest", "DQ_Rate", "Speed_Index", "Autostart_Pos", "Market_Prob",
+    "Discipline_Attele", "Draw", "Weight_KG"
 ]
 
 
@@ -141,7 +142,14 @@ def build_todays_dataframe(full_text):
             (1 if ("dp" in comment or "da" in comment or "deferre" in comment or "déferré" in comment) else 0)
         driver_rank = get_person_rank(row["Driver"], "Driver")
         trainer_rank = get_person_rank(row["Trainer"], "Trainer")
-        speed_idx = chrono_to_speed_index(row["Chrono"])
+        is_attele = 1 if row["Discipline"] == "ATTELE" else 0
+        # Speed_Index only has real meaning for ATTELE (trot) races, where a
+        # genuine per-km chrono is published. Non-trot disciplines get 0
+        # ("not applicable") rather than a plausible-looking fake value —
+        # the Discipline_Attele flag lets the model learn to ignore it there.
+        speed_idx = chrono_to_speed_index(row["Chrono"]) if is_attele else 0.0
+        draw = row["Draw"] if row["Draw"] is not None else 0
+        weight_kg = row["Weight_KG"] if row["Weight_KG"] is not None else 0.0
         days_rest = parse_rest_days(comment)
         autostart_pos = parse_autostart_position(row["Num"], full_text)
         dq_rate = 0.2 if ("da" in comment or "disqualification" in comment) else 0.05
@@ -167,6 +175,10 @@ def build_todays_dataframe(full_text):
             "Market_Prob": market_prob,
             "Odds": dec_odds,
             "Raw_Earnings": row["Earnings"],
+            "Discipline": row["Discipline"],
+            "Discipline_Attele": is_attele,
+            "Draw": draw,
+            "Weight_KG": weight_kg,
         })
 
     return pd.DataFrame(records)
@@ -326,6 +338,9 @@ def collect_daily_results():
                 "Speed_Index": row["Speed_Index"],
                 "Autostart_Pos": row["Autostart_Pos"],
                 "Market_Prob": row["Market_Prob"],
+                "Discipline_Attele": row["Discipline_Attele"],
+                "Draw": row["Draw"],
+                "Weight_KG": row["Weight_KG"],
                 "Is_Winner": is_win
             })
 
