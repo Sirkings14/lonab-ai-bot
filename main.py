@@ -9,6 +9,8 @@ import pdfplumber
 from sklearn.ensemble import RandomForestClassifier
 from lightgbm import LGBMClassifier
 
+from pdf_parser import parse_race_card, extract_horse_comments, chrono_to_speed_index
+
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
@@ -18,10 +20,15 @@ LOCAL_PDF_PATH = "todays_active_program.pdf"
 HISTORICAL_DB_PATH = "real_history_db.csv"
 STATS_DB_PATH = "driver_trainer_stats.csv"
 
+FEATURE_COLS = [
+    "Earnings", "Age", "Shoe_Status", "Driver_Rank", "Trainer_Rank",
+    "Days_Rest", "DQ_Rate", "Speed_Index", "Autostart_Pos", "Market_Prob"
+]
+
 
 def send_telegram_message(message):
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
-        print("⚠️ Telegram token or Chat ID missing. Skipping alert.")
+        print("Telegram token or Chat ID missing. Skipping alert.")
         print(message)
         return
 
@@ -34,11 +41,11 @@ def send_telegram_message(message):
     try:
         res = requests.post(url, json=payload)
         if res.status_code == 200:
-            print("📱 Telegram message sent successfully!")
+            print("Telegram message sent successfully!")
         else:
-            print(f"❌ Telegram Error: {res.text}")
+            print(f"Telegram Error: {res.text}")
     except Exception as e:
-        print(f"❌ Telegram Connection Error: {e}")
+        print(f"Telegram Connection Error: {e}")
 
 
 def get_person_rank(name, role="Driver"):
@@ -55,29 +62,12 @@ def get_person_rank(name, role="Driver"):
     return 1.5
 
 
-def parse_chrono_speed(comment_text):
-    match = re.search(r"1'(\d{2})\"(\d{1,2})", comment_text)
-    if match:
-        seconds = float(match.group(1))
-        tenths = float(match.group(2)) / 10.0
-        return seconds + tenths
-    return 13.0
-
-
 def parse_rest_days(comment_text):
-    if "rentrée" in comment_text.lower() or "absent" in comment_text.lower():
+    if "rentree" in comment_text.lower() or "rentrée" in comment_text.lower() or "absent" in comment_text.lower():
         return 60.0
-    elif "récent" in comment_text.lower() or "en forme" in comment_text.lower():
+    elif "recent" in comment_text.lower() or "récent" in comment_text.lower() or "en forme" in comment_text.lower():
         return 14.0
     return 21.0
-
-
-def parse_raw_odds(comment_text):
-    match = re.search(r'\b(\d{1,3})/1\b', comment_text)
-    if match:
-        fractional = float(match.group(1))
-        return fractional + 1.0
-    return 10.0
 
 
 def parse_autostart_position(horse_num, full_text):
@@ -91,20 +81,21 @@ def parse_autostart_position(horse_num, full_text):
     return 1
 
 
-def parse_race_distance(full_text):
-    match = re.search(r'(\d{1}\s*\d{3})\s*METRES', full_text, re.IGNORECASE)
-    if match:
-        dist_str = match.group(1).replace(" ", "")
-        return float(dist_str)
-    return 2700.0
+def get_n_runners(full_text, fallback_count):
+    """Reads the '16 CONCURRENTS' style header. Falls back to the count
+    of horse numbers we actually found if the header isn't matched."""
+    m = re.search(r'(\d+)\s*CONCURRENTS', full_text, re.IGNORECASE)
+    if m:
+        return int(m.group(1))
+    return fallback_count
 
 
 def load_real_dataset():
     if os.path.exists(HISTORICAL_DB_PATH):
         df = pd.read_csv(HISTORICAL_DB_PATH)
-        print(f"✔️ Loaded {len(df)} real historical race records.")
+        print(f"Loaded {len(df)} real historical race records.")
         return df
-    print("❌ Error: real_history_db.csv not found in repository.")
+    print("Error: real_history_db.csv not found in repository.")
     return None
 
 
@@ -125,6 +116,62 @@ def calculate_kelly_stake(ai_prob, decimal_odds, fraction=0.25):
     return round(recommended_stake, 2)
 
 
+def build_todays_dataframe(full_text):
+    """
+    Parses the day's PDF text into one row per horse using REAL table data
+    (Age, Earnings, Chrono, Driver, Trainer, Odds) merged with signals
+    pulled from each horse's full prose paragraph (shoe status, rest,
+    disqualification history). No feature here is a hardcoded constant
+    shared across every horse in the race.
+    """
+    fallback_n = len(re.findall(r'^\s*(\d{1,2})\s*[-\xe2\x80\x93.]?\s*[A-Z][A-Z\s\'\.]{2,30}\s*:', full_text, re.MULTILINE))
+    n_runners = get_n_runners(full_text, fallback_n)
+
+    table_rows = parse_race_card(full_text, n_runners)
+    if not table_rows:
+        return None
+
+    comments = extract_horse_comments(full_text, n_runners)
+
+    records = []
+    for row in table_rows:
+        comment = comments.get(row["Num"], "").lower()
+
+        shoe = 2 if ("d4" in comment or "deferre des 4" in comment or "déferré des 4" in comment) else \
+            (1 if ("dp" in comment or "da" in comment or "deferre" in comment or "déferré" in comment) else 0)
+        driver_rank = get_person_rank(row["Driver"], "Driver")
+        trainer_rank = get_person_rank(row["Trainer"], "Trainer")
+        speed_idx = chrono_to_speed_index(row["Chrono"])
+        days_rest = parse_rest_days(comment)
+        autostart_pos = parse_autostart_position(row["Num"], full_text)
+        dq_rate = 0.2 if ("da" in comment or "disqualification" in comment) else 0.05
+
+        dec_odds = row["Decimal_Odds"] if row["Decimal_Odds"] else 10.0
+        market_prob = round(1.0 / dec_odds, 3) if dec_odds > 0 else 0.05
+
+        records.append({
+            "Num": row["Num"],
+            "Horse": f"{row['Num']} - {row['Horse']}",
+            "Driver": row["Driver"],
+            "Trainer": row["Trainer"],
+            "Comment": comment[:300],
+            "Earnings": np.log1p(row["Earnings"]),
+            "Age": row["Age"],
+            "Shoe_Status": shoe,
+            "Driver_Rank": driver_rank,
+            "Trainer_Rank": trainer_rank,
+            "Days_Rest": days_rest,
+            "DQ_Rate": dq_rate,
+            "Speed_Index": speed_idx,
+            "Autostart_Pos": autostart_pos,
+            "Market_Prob": market_prob,
+            "Odds": dec_odds,
+            "Raw_Earnings": row["Earnings"],
+        })
+
+    return pd.DataFrame(records)
+
+
 def run_predictions():
     print("=== MORNING WORKFLOW: QUANTITATIVE KELLY AI PREDICTIONS ===")
     headers = {"User-Agent": "Mozilla/5.0"}
@@ -138,7 +185,7 @@ def run_predictions():
             pdf_links.append(urllib.parse.urljoin(URL_PROGRAMS, href))
 
     if not pdf_links:
-        send_telegram_message("❌ *LONAB AI Alert:* No active PDF program found today.")
+        send_telegram_message("LONAB AI Alert: No active PDF program found today.")
         return
 
     today_pdf_url = pdf_links[0]
@@ -154,62 +201,20 @@ def run_predictions():
             if text:
                 full_text += "\n" + text
 
-    race_distance = parse_race_distance(full_text)
-    print(f"-> Race Distance Extracted: {race_distance}m")
-
-    runner_pattern = re.compile(
-        r'^\s*(\d{1,2})\s*[-–.]?\s*([A-Z\s\']{3,25})\s*:\s*(.*)$',
-        re.MULTILINE
-    )
-    matches = runner_pattern.findall(full_text)
-    extracted_runners = []
-
-    if matches:
-        for num, name, comment in matches:
-            clean_name = name.strip()
-            if any(hw in clean_name for hw in ["MEILLEURS", "SEMAINE", "ARRIVEE", "PRIX", "COURSE"]):
-                continue
-            driver_match = re.search(r'\b([A-Z]\.\s*[A-Z]+|\b[A-Z]{3,}\b)', comment)
-            driver = driver_match.group(0) if driver_match else "Unknown Driver"
-            
-            trainer_match = re.search(r'pensionnaire de ([A-Z][a-z\s\'\.-]+)', comment, re.IGNORECASE)
-            trainer = trainer_match.group(1).upper() if trainer_match else "Unknown Trainer"
-
-            extracted_runners.append({
-                "Num": num,
-                "Horse": f"{num} - {clean_name}",
-                "Driver": driver,
-                "Trainer": trainer,
-                "Comment": comment.strip()[:150]
-            })
-
-    if not extracted_runners:
-        for line in full_text.split('\n'):
-            m = re.match(r'^\s*(\d{1,2})\s+([A-Z\s\']{4,20})', line)
-            if m:
-                num, name = m.group(1), m.group(2).strip()
-                if not any(hw in name for hw in ["MEILLEURS", "SEMAINE", "ARRIVEE", "PRIX", "COURSE"]):
-                    extracted_runners.append({
-                        "Num": num,
-                        "Horse": f"{num} - {name}",
-                        "Driver": "Assigned Pilot",
-                        "Trainer": "Unknown Trainer",
-                        "Comment": line
-                    })
-
-    if not extracted_runners:
-        send_telegram_message("⚠️ *LONAB AI Alert:* Could not parse runners from today's PDF.")
+    todays_df = build_todays_dataframe(full_text)
+    if todays_df is None or todays_df.empty:
+        send_telegram_message(
+            "LONAB AI Alert: Could not parse today's race table. "
+            "The PDF layout may have changed - needs a manual check."
+        )
         return
-
-    todays_df = pd.DataFrame(extracted_runners)
 
     db = load_real_dataset()
     if db is None:
-        send_telegram_message("❌ *LONAB AI Error:* Missing historical database.")
+        send_telegram_message("LONAB AI Error: Missing historical database.")
         return
 
-    feature_cols = ["Earnings", "Age", "Shoe_Status", "Driver_Rank", "Trainer_Rank", "Days_Rest", "DQ_Rate", "Speed_Index", "Autostart_Pos", "Market_Prob"]
-    X = db[feature_cols]
+    X = db[FEATURE_COLS]
     y = db["Is_Winner"]
 
     rf_model = RandomForestClassifier(n_estimators=250, random_state=42, max_depth=10)
@@ -218,61 +223,34 @@ def run_predictions():
     lgb_model = LGBMClassifier(n_estimators=150, learning_rate=0.05, max_depth=6, random_state=42, verbose=-1)
     lgb_model.fit(X, y)
 
-    processed_today = []
-    decimal_odds_list = []
-
-    for idx, row in todays_df.iterrows():
-        comment = str(row.get("Comment", "")).lower()
-        
-        shoe = 2 if ("d4" in comment or "déferré des 4" in comment) else (1 if ("dp" in comment or "da" in comment or "déferré" in comment) else 0)
-        driver_rank = get_person_rank(row["Driver"], "Driver")
-        trainer_rank = get_person_rank(row["Trainer"], "Trainer")
-        speed_idx = parse_chrono_speed(comment)
-        days_rest = parse_rest_days(comment)
-        autostart_pos = parse_autostart_position(row["Num"], full_text)
-        
-        dec_odds = parse_raw_odds(comment)
-        decimal_odds_list.append(dec_odds)
-        market_prob = round(1.0 / dec_odds, 3) if dec_odds > 0 else 0.05
-        
-        dq_rate = 0.2 if "da" in comment or "disqualification" in comment else 0.05
-        earnings = np.log1p(25000.0)
-        age = 5.0
-
-        processed_today.append([
-            earnings, age, shoe, driver_rank, trainer_rank,
-            days_rest, dq_rate, speed_idx, autostart_pos, market_prob
-        ])
-
-    X_today = pd.DataFrame(processed_today, columns=feature_cols, dtype=np.float64)
+    X_today = todays_df[FEATURE_COLS].astype(np.float64)
 
     rf_probs = rf_model.predict_proba(X_today)[:, 1]
     lgb_probs = lgb_model.predict_proba(X_today)[:, 1]
     raw_ensemble_scores = (0.50 * rf_probs) + (0.50 * lgb_probs)
 
     calibrated_probs = softmax_probabilities(raw_ensemble_scores, temperature=0.35)
-    
+
     todays_df["Prob_Val"] = calibrated_probs
     todays_df["Prob"] = np.round(calibrated_probs * 100, 1)
-    todays_df["Odds"] = decimal_odds_list
-    
+
     kelly_stakes = []
     is_value_list = []
-    
+
     for idx, r in todays_df.iterrows():
         ai_p = r["Prob_Val"]
         odds = r["Odds"]
         market_p = 1.0 / odds if odds > 0 else 0.05
-        
+
         stake = calculate_kelly_stake(ai_p, odds, fraction=0.25)
         kelly_stakes.append(stake)
-        
+
         is_value = (ai_p > (market_p * 1.25)) and stake > 0
         is_value_list.append(is_value)
 
     todays_df["Kelly_Stake"] = kelly_stakes
     todays_df["Is_Value"] = is_value_list
-    
+
     todays_df = todays_df.sort_values(by="Prob", ascending=False)
     todays_df.to_csv("todays_active_runners.csv", index=False)
 
@@ -281,25 +259,25 @@ def run_predictions():
     top_4 = " - ".join(top_list[:4])
     top_5 = " - ".join(top_list[:5])
 
-    msg = f"🐎 *QUANT LONAB AI PREDICTIONS* 🐎\n"
-    msg += f"📏 *Distance:* `{int(race_distance)}m` | 🧠 *Engine:* `RF + LightGBM`\n\n"
-    msg += f"🥇 *TOP 3 (TIERCÉ):*\n`{top_3}`\n\n"
-    msg += f"🥈 *TOP 4 (QUARTÉ):*\n`{top_4}`\n\n"
-    msg += f"🥉 *TOP 5 (QUINTÉ):*\n`{top_5}`\n\n"
-    
+    msg = f"LONAB QUANT AI PREDICTIONS\n"
+    msg += f"Engine: RF + LightGBM | Runners: {len(todays_df)}\n\n"
+    msg += f"TOP 3 (TIERCE):\n{top_3}\n\n"
+    msg += f"TOP 4 (QUARTE):\n{top_4}\n\n"
+    msg += f"TOP 5 (QUINTE):\n{top_5}\n\n"
+
     value_bets = todays_df[todays_df["Is_Value"] == True]
     if not value_bets.empty:
-        msg += "🔥 *VALUE OVERLAY BETS IDENTIFIED:*\n"
+        msg += "VALUE OVERLAY BETS IDENTIFIED:\n"
         for _, v in value_bets.iterrows():
-            msg += f"• *{v['Horse']}* | Odds: `{v['Odds']}x` | AI Prob: *{v['Prob']}%* | 💰 Stake: `{v['Kelly_Stake']}% Bankroll`\n"
+            msg += f"- {v['Horse']} | Odds: {v['Odds']}x | AI Prob: {v['Prob']}% | Stake: {v['Kelly_Stake']}% Bankroll\n"
         msg += "\n"
     else:
-        msg += "💡 *Market Value Check:* No major market mispricings detected today.\n\n"
+        msg += "Market Value Check: No major market mispricings detected today.\n\n"
 
-    msg += "📊 *Full Probabilities & Kelly Allocations:*\n"
+    msg += "Full Probabilities & Kelly Allocations:\n"
     for _, r in todays_df.head(8).iterrows():
-        stake_str = f" | Stake: `{r['Kelly_Stake']}%`" if r['Kelly_Stake'] > 0 else ""
-        msg += f"• {r['Horse']} ({r['Driver']}): *{r['Prob']}%*{stake_str}\n"
+        stake_str = f" | Stake: {r['Kelly_Stake']}%" if r['Kelly_Stake'] > 0 else ""
+        msg += f"- {r['Horse']} ({r['Driver']}): {r['Prob']}%{stake_str}\n"
 
     send_telegram_message(msg)
 
@@ -307,7 +285,7 @@ def run_predictions():
 def collect_daily_results():
     print("=== EVENING WORKFLOW: SCRAPING OFFICIAL RESULTS ===")
     if not os.path.exists("todays_active_runners.csv"):
-        print("❌ No active runner data found to match results.")
+        print("No active runner data found to match results.")
         return
 
     headers = {"User-Agent": "Mozilla/5.0"}
@@ -316,13 +294,13 @@ def collect_daily_results():
         soup = BeautifulSoup(res.text, "html.parser")
         text_content = soup.get_text()
 
-        arrival_match = re.search(r'(?:Arrivée|ARRIVEE)\s*:?\s*([\d\s\-–]+)', text_content)
+        arrival_match = re.search(r'(?:Arrivee|Arrivée|ARRIVEE)\s*:?\s*([\d\s\-\xe2\x80\x93]+)', text_content)
         if not arrival_match:
-            print("⚠️ Official results not yet published on LONAB.")
+            print("Official results not yet published on LONAB.")
             return
 
         winning_numbers = re.findall(r'\b\d{1,2}\b', arrival_match.group(1))[:5]
-        print(f"🎯 Official Winning Numbers Scraped: {winning_numbers}")
+        print(f"Official Winning Numbers Scraped: {winning_numbers}")
 
         if not winning_numbers:
             return
@@ -331,30 +309,25 @@ def collect_daily_results():
         new_records = []
 
         for idx, row in todays_df.iterrows():
-            horse_num_match = re.search(r'^\s*(\d{1,2})', str(row["Horse"]))
-            if horse_num_match:
-                num = horse_num_match.group(1)
-                is_win = 1 if num in winning_numbers else 0
-                comment = str(row.get("Comment", "")).lower()
-                shoe = 2 if ("d4" in comment or "déferré des 4" in comment) else (1 if ("dp" in comment or "da" in comment or "déferré" in comment) else 0)
-                driver_rank = get_person_rank(row.get("Driver", ""), "Driver")
-                trainer_rank = get_person_rank(row.get("Trainer", ""), "Trainer")
-                dec_odds = parse_raw_odds(comment)
-                market_prob = round(1.0 / dec_odds, 3) if dec_odds > 0 else 0.05
+            num = str(row["Num"]).zfill(2)
+            is_win = 1 if (num in winning_numbers or num.lstrip("0") in winning_numbers) else 0
 
-                new_records.append({
-                    "Earnings": 25000.0,
-                    "Age": 5.0,
-                    "Shoe_Status": shoe,
-                    "Driver_Rank": driver_rank,
-                    "Trainer_Rank": trainer_rank,
-                    "Days_Rest": parse_rest_days(comment),
-                    "DQ_Rate": 0.2 if "da" in comment or "disqualification" in comment else 0.05,
-                    "Speed_Index": parse_chrono_speed(comment),
-                    "Autostart_Pos": parse_autostart_position(num, comment),
-                    "Market_Prob": market_prob,
-                    "Is_Winner": is_win
-                })
+            # Reuse the SAME real per-horse features used for the morning
+            # prediction (not hardcoded constants), so the database that
+            # trains tomorrow's model matches what the model actually saw.
+            new_records.append({
+                "Earnings": row["Earnings"],
+                "Age": row["Age"],
+                "Shoe_Status": row["Shoe_Status"],
+                "Driver_Rank": row["Driver_Rank"],
+                "Trainer_Rank": row["Trainer_Rank"],
+                "Days_Rest": row["Days_Rest"],
+                "DQ_Rate": row["DQ_Rate"],
+                "Speed_Index": row["Speed_Index"],
+                "Autostart_Pos": row["Autostart_Pos"],
+                "Market_Prob": row["Market_Prob"],
+                "Is_Winner": is_win
+            })
 
         if new_records:
             new_df = pd.DataFrame(new_records)
@@ -363,15 +336,15 @@ def collect_daily_results():
                 updated_db = pd.concat([db, new_df], ignore_index=True)
                 updated_db.to_csv(HISTORICAL_DB_PATH, index=False)
 
-                print(f"✔️ Added {len(new_records)} real outcomes to historical database!")
+                print(f"Added {len(new_records)} real outcomes to historical database!")
 
-                msg = f"📊 *LONAB AI AUTO-LEARNING UPDATE*\n\n"
-                msg += f"🏁 *Official Arrivée:* `{' - '.join(winning_numbers)}`\n"
-                msg += f"🧠 Added today's race matrix to AI memory. Total database size: *{len(updated_db)} records*."
+                msg = f"LONAB AI AUTO-LEARNING UPDATE\n\n"
+                msg += f"Official Arrivee: {' - '.join(winning_numbers)}\n"
+                msg += f"Added today's race matrix to AI memory. Total database size: {len(updated_db)} records."
                 send_telegram_message(msg)
 
     except Exception as e:
-        print(f"❌ Error collecting results: {e}")
+        print(f"Error collecting results: {e}")
 
 
 if __name__ == "__main__":

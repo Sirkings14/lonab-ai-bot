@@ -1,13 +1,15 @@
-name: Daily LONAB AI Prediction Bot
+name: Daily LONAB AI Prediction & Auto-Learning Bot
 
 on:
   schedule:
-    # Runs every day at 10:00 AM UTC (Adjust time as needed)
+    # Morning Predictions at 10:00 AM UTC
     - cron: '0 10 * * *'
-  workflow_dispatch: # Allows manual trigger from GitHub UI anytime
+    # Evening Auto-Learning at 18:00 PM UTC
+    - cron: '0 18 * * *'
+  workflow_dispatch:
 
 jobs:
-  build-and-run:
+  run-pipeline:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repository
@@ -23,8 +25,25 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Execute Daily AI Pipeline
+      - name: Run Morning Predictions
+        if: github.event.schedule == '0 10 * * *' || github.event_name == 'workflow_dispatch'
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python main.py
+
+      - name: Run Evening Auto-Learning
+        if: github.event.schedule == '0 18 * * *'
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python main.py --evening
+
+      - name: Commit & Save Learning Memory to GitHub
+        if: github.event.schedule == '0 18 * * *'
+        run: |
+          git config --global user.name "LONAB AI Bot"
+          git config --global user.email "bot@lonab-ai.com"
+          git add real_history_db.csv
+          git commit -m "Updated AI learning database with daily results [skip ci]" || exit 0
+          git push
