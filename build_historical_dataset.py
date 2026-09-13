@@ -206,6 +206,24 @@ def backfill(days_back=60):
             continue  # have the result, but not that day's own program text
         df = build_todays_dataframe(program_texts[date_key])
         if df is None or df.empty:
+            if not globals().get('_debug_dumped'):
+                globals()['_debug_dumped'] = True
+                from pdf_parser import detect_discipline
+                text = program_texts[date_key]
+                disc = detect_discipline(text)
+                n_match = re.search(r'(\d+)\s*CONCURRENTS', text, re.IGNORECASE)
+                print(f"  --- DEBUG for {date_key} (discipline={disc}, "
+                      f"CONCURRENTS match={n_match.group(1) if n_match else None}) ---")
+                lines = [l.strip() for l in text.split('\n') if l.strip()]
+                try:
+                    marker_idx = lines.index('N°')
+                    print(f"  Lines around 'N°' marker (idx {marker_idx}):")
+                    for l in lines[max(0, marker_idx-3):marker_idx+15]:
+                        print(f"    {repr(l)}")
+                except ValueError:
+                    print("  'N\u00b0' marker not found in text at all.")
+                    print(f"  First 25 non-empty lines: {[repr(l) for l in lines[:25]]}")
+                print(f"  --- END DEBUG ---")
             print(f"  {date_key}: program text found but failed to parse into rows")
             continue
         df["Is_Winner"] = df["Num"].apply(lambda n: 1 if n in top5 else 0)
