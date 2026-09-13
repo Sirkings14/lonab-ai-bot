@@ -1,15 +1,20 @@
-name: Collect LONAB Historical Data
+name: Backfill LONAB Historical Race Database
 
 on:
+  schedule:
+    # Weekly, since each run re-walks the recently-archived programs
+    - cron: '0 6 * * 1'
   workflow_dispatch:
+    inputs:
+      days_back:
+        description: 'How many days back to probe for program PDFs'
+        default: '60'
+        required: false
 
 jobs:
-  collect-historical-data:
-
+  backfill:
     runs-on: ubuntu-latest
-
     steps:
-
       - name: Checkout repository
         uses: actions/checkout@v4
 
@@ -23,16 +28,14 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run historical collector
+      - name: Run historical backfill
         run: |
-          python scraper.py
+          python build_historical_dataset.py ${{ github.event.inputs.days_back || '60' }}
 
-      - name: Upload historical data
-        uses: actions/upload-artifact@v4
-        with:
-          name: lonab-historical-pdfs
-          path: |
-            data/raw_programmes/
-            data/raw_results/
-            data/archive/
-          if-no-files-found: warn
+      - name: Commit updated historical database
+        run: |
+          git config --global user.name "LONAB AI Bot"
+          git config --global user.email "bot@lonab-ai.com"
+          git add real_history_db.csv backfilled_dates.txt
+          git commit -m "Backfill: add newly-discovered labeled historical races [skip ci]" || exit 0
+          git push
