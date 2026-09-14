@@ -187,6 +187,9 @@ def extract_pdf_text_multi_strategy(pdf):
             pass  # cropping can fail on unusual page geometry; other strategies still apply
 
     return full_text
+
+
+def chrono_to_speed_index(chrono_str, default=13.0):
     """
     Converts the table's 'M.SS.HH' chrono (e.g. "1.12.50" = 1'12"50/km)
     to the same seconds(+fraction) scale used historically:
