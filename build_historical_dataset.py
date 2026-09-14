@@ -62,7 +62,7 @@ def fetch_pdf_text(url, headers):
     full_text = ""
     with pdfplumber.open(tmp_path) as pdf:
         for page in pdf.pages:
-            t = page.extract_text(x_tolerance=1)
+            t = page.extract_text(layout=True)
             if t:
                 full_text += "\n" + t
     os.remove(tmp_path)

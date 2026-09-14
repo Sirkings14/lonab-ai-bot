@@ -209,7 +209,13 @@ def run_predictions():
     full_text = ""
     with pdfplumber.open(LOCAL_PDF_PATH) as pdf:
         for page in pdf.pages:
-            text = page.extract_text(x_tolerance=1)
+            # layout=True asks pdfplumber to reconstruct the page's visual
+            # character grid, which handles this document's two-column
+            # layout far better than the default reading-order extraction —
+            # without it, left-column and right-column text get spliced
+            # together mid-line (verified: this was silently corrupting
+            # every multi-column page before this fix).
+            text = page.extract_text(layout=True)
             if text:
                 full_text += "\n" + text
 
