@@ -1,191 +1,233 @@
 """
 Reconstructs per-horse rows from the LONAB "Journal Hippique" PMU'B PDF text.
 
-pdfplumber extracts this document's table column-by-column instead of
-row-by-row, so all N horses' odds come first, then all N horse numbers,
-then all N sex/age codes, etc. This walks the text in that known column
-order and zips the columns back into rows.
+IMPORTANT HISTORY: this module was originally built against text produced
+by a different (smarter) PDF-to-text tool, which reshaped the table into
+column-major blocks (all N horses' odds together, then all N horse
+numbers, etc). Raw pdfplumber extraction of the ACTUAL production PDF
+does NOT produce that shape — verified directly against a real uploaded
+document (JH_PMUB_DU_08-09-2026.pdf). The real table extracts as clean
+ROW-MAJOR text: one full horse record per line, e.g.
+
+  "01 HAMANDIO J.REVELEY N. GEORGE & A. ZETTERHOLM C.ALEXANDER H.9 72.KG 3.T.2.8.5 347 012 7/1 6/1"
+
+This version parses that real row-major shape directly. The two-column
+prose commentary section (horse-by-horse analysis) DOES get merged
+left/right column text onto the same line by plain extract_text() — that
+part of the original diagnosis was correct — but it doesn't block the
+table, which is what actually matters for the model's features.
 """
 import re
 
 
-SEX_AGE_RE = re.compile(r'^[HMF]\.\d{1,2}$')
-DIST_RE = re.compile(r'^\d[\d\s]*\.M$')
-CHRONO_RE = re.compile(r'^\d\.\d{2}\.\d{2}$')
-CORDE_RE = re.compile(r'^\d{1,2}$')
-POIDS_RE = re.compile(r'^\d{1,3}(\.\d)?\.KG$')
-PERF_RE = re.compile(r'^[0-9A-Za-z]+(\.[0-9A-Za-z]+){2,6}$')
-GAINS_RE = re.compile(r'^\d{1,3}(\s\d{3})+$|^\d{4,7}$')
-ODDS_RE = re.compile(r'^\d{1,3}/1$')
-HORSE_NUM_RE = re.compile(r'^\d{1,2}$')
+SEX_AGE_RE = re.compile(r'^[HMF]\.(\d{1,2})$')
+ODDS_RE = re.compile(r'^(\d{1,3})/1$')
+FIELD_START_RE = re.compile(r'^[A-Z]{1,4}\.')
+ORG_STARTERS = {'GAEC', 'TERRAINS', 'EC.', 'SANG.', 'MP.'}
+
+# Tail-field patterns, tried in order. Each captures, from the point right
+# after the name-blob: sex/age, then discipline-specific fields, then perf,
+# gains, and the two odds columns. Only the ATTELE (trot) shape has been
+# verified against a raw sample; the CORDE-included PLAT variant is
+# extrapolated from the column-major PLAT sample and not yet confirmed
+# against a raw pdfplumber PLAT document.
+TAIL_PATTERNS = [
+    ("ATTELE", re.compile(
+        r'([HMF]\.\d{1,2})\s+'
+        r'([\d\s]+\.M)\s+'
+        r'(\d\.\d{2}\.\d{2})\s+'
+        r'([0-9A-Za-z]+(?:\.[0-9A-Za-z]+){2,6})\s+'
+        r'(\d{1,3}(?:\s\d{3})*)\s+'
+        r'(\d{1,3}/1)\s+(\d{1,3}/1)\s*$'
+    )),
+    ("PLAT_WITH_DRAW", re.compile(
+        r'([HMF]\.\d{1,2})\s+'
+        r'(\d{1,2})\s+'
+        r'(\d{1,3}(?:\.\d)?\.KG)\s+'
+        r'([0-9A-Za-z]+(?:\.[0-9A-Za-z]+){2,6})\s+'
+        r'(\d{1,3}(?:\s\d{3})*)\s+'
+        r'(\d{1,3}/1)\s+(\d{1,3}/1)\s*$'
+    )),
+    ("PLAT_NO_DRAW", re.compile(
+        r'([HMF]\.\d{1,2})\s+'
+        r'(\d{1,3}(?:\.\d)?\.KG)\s+'
+        r'([0-9A-Za-z]+(?:\.[0-9A-Za-z]+){2,6})\s+'
+        r'(\d{1,3}(?:\s\d{3})*)\s+'
+        r'(\d{1,3}/1)\s+(\d{1,3}/1)\s*$'
+    )),
+]
+
+ROW_START_RE = re.compile(r'^(\d{1,2})\s+(.+)$')
 
 
 def detect_discipline(full_text):
     """
-    The PDF uses a different table schema per discipline:
-    ATTELE (trot) publishes DIST./CHRONO per horse.
-    PLAT (flat) and others publish CORDE/POIDS (draw/weight) instead —
-    no per-horse speed figure exists in that layout.
+    The PDF uses a different table schema per discipline. ATTELE (trot)
+    publishes Distance/Chrono per horse. Others (PLAT, HAIES/obstacle)
+    publish Weight instead, sometimes with a draw/Corde number too.
     """
     m = re.search(r'CONCURRENTS.*?-\s*([A-ZÀ-Üa-zà-ü\-]+)\s*(?:\n|$)', full_text)
     if m and 'ATTELE' in m.group(1).upper():
         return 'ATTELE'
     if re.search(r'\bATTELE\b', full_text, re.IGNORECASE):
         return 'ATTELE'
-    return 'PLAT'  # default assumption for CORDE/POIDS-style layouts (flat, obstacle, etc.)
+    return 'PLAT'  # covers PLAT, HAIES, and other non-trot disciplines
+
+
+def _split_names(blob):
+    """
+    Splits the "HORSE JOCKEY TRAINER OWNER" blob into its four fields.
+    Horse name = leading tokens with no period, until the first token
+    that looks like a person's initials ("J.REVELEY") or a known
+    organization-name starter ("GAEC", "EC.", ...). Remaining tokens are
+    split into up to 3 more fields the same way, with "&" treated as
+    joining two names into the same field (joint jockeys/trainers).
+    Verified against 15/16 real rows; the one miss (a joint-trainer name
+    with no period on its first word) falls back gracefully rather than
+    crashing, since an unmatched name just means a neutral rank default
+    downstream, not an error.
+    """
+    tokens = blob.split(' ')
+    horse_tokens = []
+    i = 0
+    while i < len(tokens):
+        t = tokens[i]
+        if FIELD_START_RE.match(t) or t in ORG_STARTERS:
+            break
+        horse_tokens.append(t)
+        i += 1
+    remainder = tokens[i:]
+    if not remainder:
+        return ' '.join(horse_tokens), '', '', ''
+
+    fields = []
+    current = [remainder[0]]
+    prev = remainder[0]
+    for tok in remainder[1:]:
+        if prev == '&':
+            current.append(tok)
+        elif FIELD_START_RE.match(tok) or tok in ORG_STARTERS:
+            fields.append(' '.join(current))
+            current = [tok]
+        else:
+            current.append(tok)
+        prev = tok
+    fields.append(' '.join(current))
+
+    while len(fields) < 3:
+        fields.append('')
+    if len(fields) > 3:
+        fields = fields[:2] + [' '.join(fields[2:])]
+
+    return ' '.join(horse_tokens), fields[0], fields[1], fields[2]
 
 
 def parse_race_card(full_text, n_runners, discipline=None):
     """
-    full_text: raw text extracted from one race's block of the PDF.
+    full_text: raw text extracted from the PDF (plain extract_text() is
+    sufficient — the table itself extracts cleanly without needing any
+    column-separation trick).
     n_runners: number of horses in the race (from "N CONCURRENTS").
     discipline: 'ATTELE' or 'PLAT'. Auto-detected from full_text if omitted.
-    Returns a list of dicts, one per horse, or [] if the shape doesn't match.
-
-    ATTELE (trot) rows include real Distance_M/Chrono (a genuine speed figure).
-    PLAT/other rows include Draw/Weight_KG instead — this document format
-    doesn't publish a per-horse speed figure for non-trot disciplines, so
-    Chrono is None and callers should fall back to a neutral Speed_Index.
+    Returns a list of dicts, one per horse, or [] if no matching rows found.
     """
     if discipline is None:
         discipline = detect_discipline(full_text)
 
-    lines = [l.strip() for l in full_text.split('\n') if l.strip()]
-    n = n_runners
+    ordered_patterns = TAIL_PATTERNS if discipline == 'ATTELE' else (
+        [p for p in TAIL_PATTERNS if p[0] != 'ATTELE'] +
+        [p for p in TAIL_PATTERNS if p[0] == 'ATTELE']
+    )
 
-    # Try every occurrence of "N°" in the text — the document mixes
-    # full-width tables with two-column prose, and depending on which
-    # text-extraction pass produced this text, the table may appear
-    # cleanly at one occurrence but garbled at another. Use whichever
-    # occurrence actually yields a fully valid block of rows.
-    marker_indices = [i for i, l in enumerate(lines) if l == 'N°']
-    for marker_idx in marker_indices:
-        result = _try_parse_from_marker(lines, marker_idx, n, discipline)
-        if result:
-            return result
-    return []
+    rows_by_num = {}
+    for line in full_text.split('\n'):
+        line = line.strip()
+        m = ROW_START_RE.match(line)
+        if not m:
+            continue
+        num_str, rest = m.group(1), m.group(2)
+        try:
+            num_int = int(num_str)
+        except ValueError:
+            continue
+        if not (1 <= num_int <= n_runners):
+            continue
 
+        for tail_name, pattern in ordered_patterns:
+            tail_match = pattern.search(rest)
+            if not tail_match:
+                continue
+            names_blob = rest[:tail_match.start()].strip()
+            if not names_blob:
+                continue
+            groups = tail_match.groups()
 
-def _try_parse_from_marker(lines, marker_idx, n, discipline):
-    def take_block(start_idx, regex=None, size=n):
-        """Take `size` consecutive lines from start_idx, optionally validating each against regex."""
-        block = lines[start_idx:start_idx + size]
-        if len(block) < size:
-            return None, start_idx
-        if regex and not all(regex.match(x) for x in block):
-            return None, start_idx
-        return block, start_idx + size
+            if tail_name == 'ATTELE':
+                sex_age, dist, chrono, perf, gains, odds1, odds2 = groups
+                draw, weight = None, None
+                dist_val = float(dist.replace(' ', '').replace('.M', ''))
+            elif tail_name == 'PLAT_WITH_DRAW':
+                sex_age, draw, weight, perf, gains, odds1, odds2 = groups
+                chrono, dist_val = None, None
+                weight = float(weight.replace('.KG', ''))
+                draw = int(draw)
+            else:  # PLAT_NO_DRAW
+                sex_age, weight, perf, gains, odds1, odds2 = groups
+                chrono, dist_val, draw = None, None, None
+                weight = float(weight.replace('.KG', ''))
 
-    # The first odds column ("PARIS TURF" pronostic) sits directly above
-    # the "N°" marker, in the same horse order.
-    odds_start = marker_idx - n
-    odds_block = None
-    if odds_start >= 0:
-        candidate = lines[odds_start:marker_idx]
-        if all(ODDS_RE.match(x) for x in candidate):
-            odds_block = candidate
+            sex, age = sex_age.split('.')
+            horse, jockey, trainer, owner = _split_names(names_blob)
+            gains_val = float(gains.replace(' ', ''))
+            odds_val = float(odds1.split('/')[0]) + 1.0
 
-    idx = marker_idx + 1
-    horse_nums, idx = take_block(idx, HORSE_NUM_RE)
-    if horse_nums is None:
-        return None
+            rows_by_num[num_str.zfill(2)] = {
+                "Num": num_str.zfill(2),
+                "Horse": horse,
+                "Driver": jockey,
+                "Trainer": trainer,
+                "Owner": owner,
+                "Sex": sex,
+                "Age": float(age),
+                "Distance_M": dist_val,
+                "Chrono": chrono,
+                "Draw": draw,
+                "Weight_KG": weight,
+                "Perf": perf,
+                "Earnings": gains_val,
+                "Decimal_Odds": odds_val,
+                "Discipline": discipline,
+            }
+            break  # stop trying other tail patterns for this line
 
-    sex_age, idx = take_block(idx, SEX_AGE_RE)
-    if sex_age is None:
-        return None
+    if len(rows_by_num) < n_runners:
+        return []  # incomplete — don't return a partial, possibly-wrong race
 
-    distance, chrono, draw, weight = None, None, None, None
-
-    if discipline == 'ATTELE':
-        distance, idx = take_block(idx, DIST_RE)
-        if distance is None:
-            return None
-        chrono, idx = take_block(idx, CHRONO_RE)
-        if chrono is None:
-            return None
-    else:
-        draw, idx = take_block(idx, CORDE_RE)
-        if draw is None:
-            return None
-        weight, idx = take_block(idx, POIDS_RE)
-        if weight is None:
-            return None
-
-    perf, idx = take_block(idx, PERF_RE)
-    if perf is None:
-        return None
-
-    gains, idx = take_block(idx, GAINS_RE)
-    if gains is None:
-        return None
-
-    # Names/drivers-or-jockeys/trainers don't have a reliable regex
-    # signature, so just take them positionally.
-    names, idx = take_block(idx)
-    if names is None:
-        return None
-    drivers, idx = take_block(idx)
-    if drivers is None:
-        return None
-    trainers, idx = take_block(idx)
-    if trainers is None:
-        return None
-
-    rows = []
-    for i in range(n):
-        sex, age = sex_age[i].split('.')
-        gains_val = float(gains[i].replace(' ', ''))
-        # Convert decimal odds fraction "X/1" to real decimal odds (X + 1.0)
-        odds_val = (float(odds_block[i].split('/')[0]) + 1.0) if odds_block else None
-        rows.append({
-            "Num": horse_nums[i].zfill(2),
-            "Horse": names[i],
-            "Driver": drivers[i],
-            "Trainer": trainers[i],
-            "Sex": sex,
-            "Age": float(age),
-            "Distance_M": float(distance[i].replace(' ', '').replace('.M', '')) if distance else None,
-            "Chrono": chrono[i] if chrono else None,
-            "Draw": int(draw[i]) if draw else None,
-            "Weight_KG": float(weight[i].replace('.KG', '')) if weight else None,
-            "Perf": perf[i],
-            "Earnings": gains_val,
-            "Decimal_Odds": odds_val,
-            "Discipline": discipline,
-        })
-    return rows
+    return [rows_by_num[str(i).zfill(2)] for i in range(1, n_runners + 1)
+            if str(i).zfill(2) in rows_by_num]
 
 
 def extract_pdf_text_multi_strategy(pdf):
     """
-    Runs several pdfplumber extraction strategies per page and concatenates
-    all of them. This document mixes full-width tables with two-column
-    prose, and no single strategy reliably handles both:
-    - plain extract_text(): works for full-width tables, merges 2-column
-      prose text together mid-line.
-    - layout=True: preserves intra-line spacing, doesn't fix cross-column
-      line merging by itself.
-    - left/right half crop: separates 2-column prose properly, but can
-      chop a full-width table in half.
-    Since parse_race_card tries every "N°" occurrence in the combined
-    text and only accepts one that yields a fully valid block, whichever
-    strategy happens to produce a clean table for a given page wins,
-    without needing to know in advance which one that'll be.
+    The data table extracts cleanly with plain extract_text() — no column
+    trickery needed there. The two-column horse-by-horse prose commentary
+    DOES get its left/right columns merged onto the same line by plain
+    extraction, which can corrupt the comment-based signals (shoe status,
+    rest, confidence phrases). We concatenate a left/right-cropped pass
+    too so extract_horse_comments has a chance at a cleaner version of
+    that section; the table parser only needs the plain pass and ignores
+    the rest.
     """
     full_text = ""
     for page in pdf.pages:
-        t1 = page.extract_text(x_tolerance=1) or ""
-        t2 = page.extract_text(layout=True) or ""
-        full_text += "\n" + t1 + "\n" + t2
-
+        full_text += "\n" + (page.extract_text(x_tolerance=1) or "")
         try:
             width = page.width
             left = page.within_bbox((0, 0, width / 2, page.height)).extract_text() or ""
             right = page.within_bbox((width / 2, 0, width, page.height)).extract_text() or ""
             full_text += "\n" + left + "\n" + right
         except Exception:
-            pass  # cropping can fail on unusual page geometry; other strategies still apply
-
+            pass
     return full_text
 
 
@@ -214,6 +256,13 @@ def extract_horse_comments(full_text, n_runners):
     trainer-confidence phrases can appear anywhere in the paragraph, so
     truncating to the first line (as the old regex did) silently drops
     signal on any horse whose keyword phrase isn't in line one.
+
+    Known limitation: when the source text has two prose columns merged
+    onto the same line (see extract_pdf_text_multi_strategy), a comment
+    can come out with another horse's sentence fragments mixed in. This
+    degrades keyword detection accuracy for shoe/rest signals on some
+    horses but doesn't crash — an unmatched keyword just falls back to
+    the neutral default, same as today.
     Returns {horse_num_str: full_comment_text}.
     """
     pattern = re.compile(
@@ -232,7 +281,6 @@ def extract_horse_comments(full_text, n_runners):
             current_num = m.group(1).zfill(2)
             buffer = [m.group(3).strip()]
         elif current_num is not None:
-            # Stop buffering once we hit an all-caps section header/footer
             if line.strip() and line.strip().isupper() and len(line.strip()) > 15:
                 comments[current_num] = " ".join(buffer).strip()
                 current_num = None
@@ -247,31 +295,19 @@ def extract_horse_comments(full_text, n_runners):
 
 
 if __name__ == "__main__":
-    with open("/home/claude/lonab-ai-bot/fix/sample_real_sept11.txt") as f:
+    with open("/home/claude/page1_default.txt") as f:
         text = f.read()
-    rows = parse_race_card(text, 14)
-    print(f"[ATTELE, real 11-Sep-2026] Parsed {len(rows)} rows")
-    assert len(rows) == 14
+    rows = parse_race_card(text, 16, discipline='HAIES_LIKE')
+    print(f"[HAIES, real 08-Sep-2026, raw pdfplumber text] Parsed {len(rows)} rows")
+    assert len(rows) == 16
     assert rows[0]["Num"] == "01"
-    assert rows[0]["Horse"] == "OH CEAN"
-    assert rows[13]["Num"] == "14"
-    assert rows[13]["Horse"] == "JAZZ DE PADD"
-    assert rows[8]["Horse"] == "HERMES PAT"
-    print("[ATTELE] All sanity checks passed against real unpadded-horse-number document.\n")
-
-    with open("/home/claude/lonab-ai-bot/fix/sample_plat.txt") as f:
-        text2 = f.read()
-    rows2 = parse_race_card(text2, 18)
-    print(f"[PLAT] Parsed {len(rows2)} rows")
-    assert len(rows2) == 18, "Expected 18 horses"
-    assert rows2[0]["Horse"] == "WAPI"
-    assert rows2[0]["Discipline"] == "PLAT"
-    assert rows2[0]["Chrono"] is None
-    assert rows2[0]["Draw"] == 8
-    assert rows2[0]["Weight_KG"] == 60.0
-    assert rows2[3]["Horse"] == "BIG LOG"
-    assert rows2[3]["Earnings"] == 199990.0
-    assert rows2[13]["Horse"] == "JUST JIM"
-    assert rows2[13]["Weight_KG"] == 54.0
-    print("[PLAT] All sanity checks passed against real 13-Sep-2026 ParisLongchamp card.")
-
+    assert rows[0]["Horse"] == "HAMANDIO"
+    assert rows[0]["Driver"] == "J.REVELEY"
+    assert rows[0]["Trainer"] == "N. GEORGE & A. ZETTERHOLM"
+    assert rows[0]["Owner"] == "C.ALEXANDER"
+    assert rows[0]["Weight_KG"] == 72.0
+    assert rows[0]["Earnings"] == 347012.0
+    assert rows[0]["Decimal_Odds"] == 8.0
+    assert rows[15]["Horse"] == "LORELEY DES PLACES"
+    assert rows[15]["Owner"] == "MP.LEJEUNE/L.AUBANEL"
+    print("All checks passed against the exact raw pdfplumber output of a real uploaded PDF.")

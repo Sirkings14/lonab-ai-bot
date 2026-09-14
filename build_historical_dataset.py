@@ -40,10 +40,21 @@ from main import build_todays_dataframe, FEATURE_COLS
 BASE_LIST_URL = "https://lonab.bf/programme-pmub"
 HISTORICAL_DB_PATH = "real_history_db.csv"
 CACHE_DIR = "backfill_cache"
+BET_LABEL = r'(?:"4\+1"|4\+1|"QUARTE"|QUARTE|"QUINTE\+"|QUINTE\+|"TIERCE"|TIERCE)'
+
 RECAP_RE = re.compile(
-    r'"?4\+1"?\s+DU\s+\w+\s+(\d{2})[/\.](\d{2})[/\.](\d{4}).*?'
+    rf'{BET_LABEL}\s+DU\s+\w+\s+(\d{{2}})[/\.](\d{{2}})[/\.](\d{{4}}).*?'
     r'Arriv[ée]e\s*:\s*([\d\s\-\u2013]+)',
     re.IGNORECASE | re.DOTALL
+)
+# A second, differently-formatted recap that appears near the top of each
+# document (textual month, "ARRIVEE DU" prefix) recapping a DIFFERENT race
+# than the one in the "RESULTATS DES COURSES" section below it — verified
+# on a real document where both appeared for different dates. Capturing
+# both roughly doubles real backfill yield per document.
+RECAP_RE_HEADER = re.compile(
+    rf'ARRIV[ÉE]E?\s+DU\s+{BET_LABEL}\s+DU\s+\w+\s+(\d{{1,2}})\s+([A-ZÉÛ]+)\s+(\d{{4}})\s*:\s*([\d\s\-\u2013]+)',
+    re.IGNORECASE
 )
 
 
@@ -76,41 +87,66 @@ FR_MONTHS = {
 }
 
 HEADER_DATE_RE = re.compile(
-    r'"?4\+1"?\s+DU\s+\w+\s+(\d{1,2})\s+([A-ZÉÛ]+)\s+(\d{4})', re.IGNORECASE
+    rf'{BET_LABEL}\s+DU\s+\w+\s+(\d{{1,2}})\s+([A-ZÉÛ]+)\s+(\d{{4}})', re.IGNORECASE
 )
 
 
 def extract_program_own_date(full_text):
     """
     Reads the program's own date from its printed header, e.g.
-    '"4+1" DU DIMANCHE 06 SEPTEMBRE 2026' -> '06-09-2026'.
-    This is far more reliable than the URL filename, which LONAB
-    formats inconsistently (hyphens vs underscores, encoding bugs).
+    '"QUARTE" DU MARDI 08 SEPTEMBRE 2026' -> '08-09-2026'.
+    Multiple bet-type labels are used interchangeably by LONAB ("4+1",
+    "QUARTE", "QUINTE+", "TIERCE") depending on the day's feature race.
+    Takes the FIRST such match that isn't itself an "ARRIVEE DU ..."
+    recap line further down the document — those share nearly identical
+    phrasing and would otherwise be mistaken for the program's own date.
     Returns 'DD-MM-YYYY' or None.
     """
-    m = HEADER_DATE_RE.search(full_text)
-    if not m:
-        return None
-    dd = m.group(1).zfill(2)
-    month_name = m.group(2).upper()
-    mm = FR_MONTHS.get(month_name)
-    if not mm:
-        return None
-    yyyy = m.group(3)
-    return f"{dd}-{mm}-{yyyy}"
+    for m in HEADER_DATE_RE.finditer(full_text):
+        preceding = full_text[max(0, m.start() - 20):m.start()]
+        if re.search(r'ARRIV[ÉE]E?\s*$', preceding, re.IGNORECASE):
+            continue  # this is a recap line, not the program's own header
+        dd = m.group(1).zfill(2)
+        month_name = m.group(2).upper()
+        mm = FR_MONTHS.get(month_name)
+        if not mm:
+            continue
+        yyyy = m.group(3)
+        return f"{dd}-{mm}-{yyyy}"
+    return None
 
 
-def extract_embedded_recap(full_text):
-    """Returns (date_str 'DD-MM-YYYY', [top5 horse numbers as zero-padded strings]) or None."""
-    m = RECAP_RE.search(full_text)
-    if not m:
-        return None
-    dd, mm, yyyy = m.group(1), m.group(2), m.group(3)
-    numbers = re.findall(r'\d{1,2}', m.group(4))[:5]
-    numbers = [n.zfill(2) for n in numbers]
-    if len(numbers) < 3:  # too little to trust as a real Arrivee line
-        return None
-    return f"{dd}-{mm}-{yyyy}", numbers
+def extract_embedded_recaps(full_text):
+    """
+    Returns a list of (date_str 'DD-MM-YYYY', [top5 horse numbers]) tuples —
+    a single document can contain TWO differently-formatted recaps for
+    TWO different past races (verified on a real document): one in the
+    "RESULTATS DES COURSES" section (numeric DD/MM/YYYY date) and one in
+    a prominent "ARRIVEE DU ..." line nearer the top (textual month name).
+    Capturing both roughly doubles real backfill yield per document.
+    """
+    results = []
+
+    for m in RECAP_RE.finditer(full_text):
+        dd, mm, yyyy = m.group(1), m.group(2), m.group(3)
+        numbers = re.findall(r'\d{1,2}', m.group(4))[:5]
+        numbers = [n.zfill(2) for n in numbers]
+        if len(numbers) >= 3:
+            results.append((f"{dd}-{mm}-{yyyy}", numbers))
+
+    for m in RECAP_RE_HEADER.finditer(full_text):
+        dd = m.group(1).zfill(2)
+        month_name = m.group(2).upper()
+        mm = FR_MONTHS.get(month_name)
+        if not mm:
+            continue
+        yyyy = m.group(3)
+        numbers = re.findall(r'\d{1,2}', m.group(4))[:5]
+        numbers = [n.zfill(2) for n in numbers]
+        if len(numbers) >= 3:
+            results.append((f"{dd}-{mm}-{yyyy}", numbers))
+
+    return results
 
 
 def program_url_for_date(dt):
@@ -176,9 +212,7 @@ def backfill(days_back=60):
         if date_key:
             program_texts[date_key] = text
 
-        recap = extract_embedded_recap(text)
-        if recap:
-            recap_date, top5 = recap
+        for recap_date, top5 in extract_embedded_recaps(text):
             recaps_found[recap_date] = top5
 
         time.sleep(0.3)  # polite pacing
