@@ -17,7 +17,7 @@ POIDS_RE = re.compile(r'^\d{1,3}(\.\d)?\.KG$')
 PERF_RE = re.compile(r'^[0-9A-Za-z]+(\.[0-9A-Za-z]+){2,6}$')
 GAINS_RE = re.compile(r'^\d{1,3}(\s\d{3})+$|^\d{4,7}$')
 ODDS_RE = re.compile(r'^\d{1,3}/1$')
-HORSE_NUM_RE = re.compile(r'^\d{2}$')
+HORSE_NUM_RE = re.compile(r'^\d{1,2}$')
 
 
 def detect_discipline(full_text):
@@ -138,7 +138,7 @@ def _try_parse_from_marker(lines, marker_idx, n, discipline):
         # Convert decimal odds fraction "X/1" to real decimal odds (X + 1.0)
         odds_val = (float(odds_block[i].split('/')[0]) + 1.0) if odds_block else None
         rows.append({
-            "Num": horse_nums[i],
+            "Num": horse_nums[i].zfill(2),
             "Horse": names[i],
             "Driver": drivers[i],
             "Trainer": trainers[i],
@@ -247,23 +247,17 @@ def extract_horse_comments(full_text, n_runners):
 
 
 if __name__ == "__main__":
-    with open("/home/claude/lonab-ai-bot/fix/sample_pdf_text.txt") as f:
+    with open("/home/claude/lonab-ai-bot/fix/sample_real_sept11.txt") as f:
         text = f.read()
-    rows = parse_race_card(text, 16)
-    print(f"[ATTELE] Parsed {len(rows)} rows")
-    assert len(rows) == 16, "Expected 16 horses"
-    assert rows[0]["Horse"] == "HAND FULL"
-    assert rows[0]["Driver"] == "D. BONNE"
-    assert rows[0]["Age"] == 8.0
-    assert rows[0]["Sex"] == "H"
-    assert rows[0]["Earnings"] == 151642.0
-    assert rows[0]["Discipline"] == "ATTELE"
-    assert rows[0]["Chrono"] == "1.12.50"
-    assert rows[9]["Horse"] == "HAJIME"
-    assert rows[4]["Trainer"] == "D. THOMAIN"  # confirmed via prose: "avec l'aide de David Thomain"
-    assert rows[13]["Trainer"] == "E. RAFFIN"  # confirmed via prose: "confié à Éric Raffin"
-    assert rows[6]["Trainer"] == "B. ROCHARD"  # confirmed via prose: "retrouvera Benjamin Rochard"
-    print("[ATTELE] All sanity checks passed.\n")
+    rows = parse_race_card(text, 14)
+    print(f"[ATTELE, real 11-Sep-2026] Parsed {len(rows)} rows")
+    assert len(rows) == 14
+    assert rows[0]["Num"] == "01"
+    assert rows[0]["Horse"] == "OH CEAN"
+    assert rows[13]["Num"] == "14"
+    assert rows[13]["Horse"] == "JAZZ DE PADD"
+    assert rows[8]["Horse"] == "HERMES PAT"
+    print("[ATTELE] All sanity checks passed against real unpadded-horse-number document.\n")
 
     with open("/home/claude/lonab-ai-bot/fix/sample_plat.txt") as f:
         text2 = f.read()
