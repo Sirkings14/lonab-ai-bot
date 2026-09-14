@@ -53,6 +53,20 @@ def parse_race_card(full_text, n_runners, discipline=None):
     lines = [l.strip() for l in full_text.split('\n') if l.strip()]
     n = n_runners
 
+    # Try every occurrence of "N°" in the text — the document mixes
+    # full-width tables with two-column prose, and depending on which
+    # text-extraction pass produced this text, the table may appear
+    # cleanly at one occurrence but garbled at another. Use whichever
+    # occurrence actually yields a fully valid block of rows.
+    marker_indices = [i for i, l in enumerate(lines) if l == 'N°']
+    for marker_idx in marker_indices:
+        result = _try_parse_from_marker(lines, marker_idx, n, discipline)
+        if result:
+            return result
+    return []
+
+
+def _try_parse_from_marker(lines, marker_idx, n, discipline):
     def take_block(start_idx, regex=None, size=n):
         """Take `size` consecutive lines from start_idx, optionally validating each against regex."""
         block = lines[start_idx:start_idx + size]
@@ -61,12 +75,6 @@ def parse_race_card(full_text, n_runners, discipline=None):
         if regex and not all(regex.match(x) for x in block):
             return None, start_idx
         return block, start_idx + size
-
-    # Find the "N°" marker that precedes the sequential horse-number column
-    try:
-        marker_idx = lines.index('N°')
-    except ValueError:
-        return []
 
     # The first odds column ("PARIS TURF" pronostic) sits directly above
     # the "N°" marker, in the same horse order.
@@ -80,48 +88,48 @@ def parse_race_card(full_text, n_runners, discipline=None):
     idx = marker_idx + 1
     horse_nums, idx = take_block(idx, HORSE_NUM_RE)
     if horse_nums is None:
-        return []
+        return None
 
     sex_age, idx = take_block(idx, SEX_AGE_RE)
     if sex_age is None:
-        return []
+        return None
 
     distance, chrono, draw, weight = None, None, None, None
 
     if discipline == 'ATTELE':
         distance, idx = take_block(idx, DIST_RE)
         if distance is None:
-            return []
+            return None
         chrono, idx = take_block(idx, CHRONO_RE)
         if chrono is None:
-            return []
+            return None
     else:
         draw, idx = take_block(idx, CORDE_RE)
         if draw is None:
-            return []
+            return None
         weight, idx = take_block(idx, POIDS_RE)
         if weight is None:
-            return []
+            return None
 
     perf, idx = take_block(idx, PERF_RE)
     if perf is None:
-        return []
+        return None
 
     gains, idx = take_block(idx, GAINS_RE)
     if gains is None:
-        return []
+        return None
 
     # Names/drivers-or-jockeys/trainers don't have a reliable regex
     # signature, so just take them positionally.
     names, idx = take_block(idx)
     if names is None:
-        return []
+        return None
     drivers, idx = take_block(idx)
     if drivers is None:
-        return []
+        return None
     trainers, idx = take_block(idx)
     if trainers is None:
-        return []
+        return None
 
     rows = []
     for i in range(n):
@@ -148,7 +156,37 @@ def parse_race_card(full_text, n_runners, discipline=None):
     return rows
 
 
-def chrono_to_speed_index(chrono_str, default=13.0):
+def extract_pdf_text_multi_strategy(pdf):
+    """
+    Runs several pdfplumber extraction strategies per page and concatenates
+    all of them. This document mixes full-width tables with two-column
+    prose, and no single strategy reliably handles both:
+    - plain extract_text(): works for full-width tables, merges 2-column
+      prose text together mid-line.
+    - layout=True: preserves intra-line spacing, doesn't fix cross-column
+      line merging by itself.
+    - left/right half crop: separates 2-column prose properly, but can
+      chop a full-width table in half.
+    Since parse_race_card tries every "N°" occurrence in the combined
+    text and only accepts one that yields a fully valid block, whichever
+    strategy happens to produce a clean table for a given page wins,
+    without needing to know in advance which one that'll be.
+    """
+    full_text = ""
+    for page in pdf.pages:
+        t1 = page.extract_text(x_tolerance=1) or ""
+        t2 = page.extract_text(layout=True) or ""
+        full_text += "\n" + t1 + "\n" + t2
+
+        try:
+            width = page.width
+            left = page.within_bbox((0, 0, width / 2, page.height)).extract_text() or ""
+            right = page.within_bbox((width / 2, 0, width, page.height)).extract_text() or ""
+            full_text += "\n" + left + "\n" + right
+        except Exception:
+            pass  # cropping can fail on unusual page geometry; other strategies still apply
+
+    return full_text
     """
     Converts the table's 'M.SS.HH' chrono (e.g. "1.12.50" = 1'12"50/km)
     to the same seconds(+fraction) scale used historically:

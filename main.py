@@ -9,7 +9,7 @@ import pdfplumber
 from sklearn.ensemble import RandomForestClassifier
 from lightgbm import LGBMClassifier
 
-from pdf_parser import parse_race_card, extract_horse_comments, chrono_to_speed_index, detect_discipline
+from pdf_parser import parse_race_card, extract_horse_comments, chrono_to_speed_index, extract_pdf_text_multi_strategy
 
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
@@ -206,18 +206,8 @@ def run_predictions():
         f.write(res.content)
     print("-> Program downloaded successfully.")
 
-    full_text = ""
     with pdfplumber.open(LOCAL_PDF_PATH) as pdf:
-        for page in pdf.pages:
-            # layout=True asks pdfplumber to reconstruct the page's visual
-            # character grid, which handles this document's two-column
-            # layout far better than the default reading-order extraction —
-            # without it, left-column and right-column text get spliced
-            # together mid-line (verified: this was silently corrupting
-            # every multi-column page before this fix).
-            text = page.extract_text(layout=True)
-            if text:
-                full_text += "\n" + text
+        full_text = extract_pdf_text_multi_strategy(pdf)
 
     todays_df = build_todays_dataframe(full_text)
     if todays_df is None or todays_df.empty:

@@ -34,6 +34,7 @@ import requests
 import pdfplumber
 import pandas as pd
 
+from pdf_parser import parse_race_card, extract_horse_comments, chrono_to_speed_index, extract_pdf_text_multi_strategy
 from main import build_todays_dataframe, FEATURE_COLS
 
 BASE_LIST_URL = "https://lonab.bf/programme-pmub"
@@ -59,12 +60,8 @@ def fetch_pdf_text(url, headers):
     with open(tmp_path, "wb") as f:
         f.write(res.content)
 
-    full_text = ""
     with pdfplumber.open(tmp_path) as pdf:
-        for page in pdf.pages:
-            t = page.extract_text(layout=True)
-            if t:
-                full_text += "\n" + t
+        full_text = extract_pdf_text_multi_strategy(pdf)
     os.remove(tmp_path)
 
     with open(cache_path, "w", encoding="utf-8") as f:
