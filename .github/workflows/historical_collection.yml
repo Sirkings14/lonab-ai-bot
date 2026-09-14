@@ -11,6 +11,9 @@ on:
         default: '60'
         required: false
 
+permissions:
+  contents: write
+
 jobs:
   backfill:
     runs-on: ubuntu-latest
