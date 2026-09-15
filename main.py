@@ -1,6 +1,7 @@
 import os
 import re
 import urllib.parse
+from datetime import datetime, timedelta
 from bs4 import BeautifulSoup
 import pandas as pd
 import numpy as np
@@ -9,7 +10,8 @@ import pdfplumber
 from sklearn.ensemble import RandomForestClassifier
 from lightgbm import LGBMClassifier
 
-from pdf_parser import parse_race_card, extract_horse_comments, chrono_to_speed_index, extract_pdf_text_multi_strategy
+from pdf_parser import (parse_race_card, extract_horse_comments, chrono_to_speed_index,
+                         extract_pdf_text_multi_strategy, extract_program_own_date)
 
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
@@ -23,7 +25,8 @@ STATS_DB_PATH = "driver_trainer_stats.csv"
 FEATURE_COLS = [
     "Earnings", "Age", "Shoe_Status", "Driver_Rank", "Trainer_Rank",
     "Days_Rest", "DQ_Rate", "Speed_Index", "Autostart_Pos", "Market_Prob",
-    "Discipline_Attele", "Draw", "Weight_KG"
+    "Discipline_Attele", "Draw", "Weight_KG",
+    "Market_Rank_In_Race", "Earnings_Rank_In_Race", "Speed_Rank_In_Race"
 ]
 
 
@@ -181,7 +184,26 @@ def build_todays_dataframe(full_text):
             "Weight_KG": weight_kg,
         })
 
-    return pd.DataFrame(records)
+    df = pd.DataFrame(records)
+    if df.empty:
+        return df
+
+    # Race-relative features: a horse's raw Speed_Index/Market_Prob/Earnings
+    # only means something compared to the OTHER horses in the SAME race —
+    # 12.5 speed units is fast or slow depending entirely on the field. Rank
+    # each horse against its own race's field (normalized to [0,1], lower =
+    # better/faster/more fancied) instead of relying on raw values alone.
+    # Speed rank is only meaningful within ATTELE races (see Speed_Index
+    # note above); non-trot rows get a neutral 0.5.
+    n = len(df)
+    df["Market_Rank_In_Race"] = df["Market_Prob"].rank(ascending=False, method="average") / n
+    df["Earnings_Rank_In_Race"] = df["Earnings"].rank(ascending=False, method="average") / n
+    if df["Discipline_Attele"].iloc[0] == 1:
+        df["Speed_Rank_In_Race"] = df["Speed_Index"].rank(ascending=True, method="average") / n
+    else:
+        df["Speed_Rank_In_Race"] = 0.5
+
+    return df
 
 
 def run_predictions():
@@ -190,24 +212,52 @@ def run_predictions():
     response = requests.get(URL_PROGRAMS, headers=headers)
     soup = BeautifulSoup(response.text, "html.parser")
 
+    # Only real race-card programs, not result-recap PDFs (LONAB's site also
+    # lists filenames like "Res_08_09_2026_QUARTE.pdf" among the .pdf links,
+    # which are results summaries, not race cards — grabbing one of those
+    # by taking the first ".pdf" link on the page was the cause of predicting
+    # on the wrong date/document).
     pdf_links = []
     for link in soup.find_all("a", href=True):
         href = link["href"]
-        if href.endswith(".pdf"):
+        if href.endswith(".pdf") and "JH_PMU" in href.upper():
             pdf_links.append(urllib.parse.urljoin(URL_PROGRAMS, href))
 
     if not pdf_links:
         send_telegram_message("LONAB AI Alert: No active PDF program found today.")
         return
 
-    today_pdf_url = pdf_links[0]
-    res = requests.get(today_pdf_url, headers=headers)
-    with open(LOCAL_PDF_PATH, "wb") as f:
-        f.write(res.content)
-    print("-> Program downloaded successfully.")
+    # The expected race date is tomorrow, local (Burkina Faso is UTC+0 all
+    # year, so "today" server-side is the correct reference with no offset).
+    expected_date = (datetime.utcnow() + timedelta(days=1)).strftime("%d-%m-%Y")
 
-    with pdfplumber.open(LOCAL_PDF_PATH) as pdf:
-        full_text = extract_pdf_text_multi_strategy(pdf)
+    todays_df = None
+    full_text = None
+    matched_url = None
+    for candidate_url in pdf_links:
+        res = requests.get(candidate_url, headers=headers)
+        with open(LOCAL_PDF_PATH, "wb") as f:
+            f.write(res.content)
+
+        with pdfplumber.open(LOCAL_PDF_PATH) as pdf:
+            candidate_text = extract_pdf_text_multi_strategy(pdf)
+
+        program_date = extract_program_own_date(candidate_text)
+        if program_date == expected_date:
+            full_text = candidate_text
+            matched_url = candidate_url
+            break
+        print(f"Skipping {candidate_url}: program date is {program_date}, expected {expected_date}")
+
+    if full_text is None:
+        send_telegram_message(
+            f"LONAB AI Alert: Could not find a program PDF dated {expected_date} "
+            f"(checked {len(pdf_links)} candidates). The site's listing may not "
+            f"have tomorrow's race up yet, or its layout changed."
+        )
+        return
+
+    print(f"-> Program downloaded successfully: {matched_url} (date {expected_date})")
 
     todays_df = build_todays_dataframe(full_text)
     if todays_df is None or todays_df.empty:
@@ -225,10 +275,22 @@ def run_predictions():
     X = db[FEATURE_COLS]
     y = db["Is_Winner"]
 
-    rf_model = RandomForestClassifier(n_estimators=250, random_state=42, max_depth=10)
+    # Regularized deliberately for a still-modest dataset (~400 rows as of
+    # this writing): the earlier config (max_depth=10, no min_samples_leaf)
+    # produced a suspicious ~0.99 cross-validated AUC on 66 rows — a
+    # textbook overfitting signal, not real skill. Shallower trees and a
+    # minimum leaf size keep the model from memorizing individual races.
+    rf_model = RandomForestClassifier(
+        n_estimators=300, random_state=42, max_depth=5,
+        min_samples_leaf=8, max_features='sqrt'
+    )
     rf_model.fit(X, y)
 
-    lgb_model = LGBMClassifier(n_estimators=150, learning_rate=0.05, max_depth=6, random_state=42, verbose=-1)
+    lgb_model = LGBMClassifier(
+        n_estimators=150, learning_rate=0.03, max_depth=4,
+        min_child_samples=15, reg_alpha=0.1, reg_lambda=0.1,
+        random_state=42, verbose=-1
+    )
     lgb_model.fit(X, y)
 
     X_today = todays_df[FEATURE_COLS].astype(np.float64)
@@ -337,6 +399,10 @@ def collect_daily_results():
                 "Discipline_Attele": row["Discipline_Attele"],
                 "Draw": row["Draw"],
                 "Weight_KG": row["Weight_KG"],
+                "Market_Rank_In_Race": row["Market_Rank_In_Race"],
+                "Earnings_Rank_In_Race": row["Earnings_Rank_In_Race"],
+                "Speed_Rank_In_Race": row["Speed_Rank_In_Race"],
+                "Race_Date": datetime.utcnow().strftime("%d-%m-%Y"),
                 "Is_Winner": is_win
             })
 

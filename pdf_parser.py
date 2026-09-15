@@ -60,6 +60,44 @@ TAIL_PATTERNS = [
 ROW_START_RE = re.compile(r'^(\d{1,2})\s+(.+)$')
 
 
+FR_MONTHS = {
+    'JANVIER': '01', 'FEVRIER': '02', 'FÉVRIER': '02', 'MARS': '03', 'AVRIL': '04',
+    'MAI': '05', 'JUIN': '06', 'JUILLET': '07', 'AOUT': '08', 'AOÛT': '08',
+    'SEPTEMBRE': '09', 'OCTOBRE': '10', 'NOVEMBRE': '11', 'DECEMBRE': '12', 'DÉCEMBRE': '12',
+}
+
+BET_LABEL = r'(?:"4\+1"|4\+1|"QUARTE"|QUARTE|"QUINTE\+"|QUINTE\+|"TIERCE"|TIERCE)'
+
+HEADER_DATE_RE = re.compile(
+    rf'{BET_LABEL}\s+DU\s+\w+\s+(\d{{1,2}})\s+([A-ZÉÛ]+)\s+(\d{{4}})', re.IGNORECASE
+)
+
+
+def extract_program_own_date(full_text):
+    """
+    Reads the program's own date from its printed header, e.g.
+    '"QUARTE" DU MARDI 08 SEPTEMBRE 2026' -> '08-09-2026'.
+    Multiple bet-type labels are used interchangeably by LONAB ("4+1",
+    "QUARTE", "QUINTE+", "TIERCE") depending on the day's feature race.
+    Takes the FIRST such match that isn't itself an "ARRIVEE DU ..."
+    recap line further down the document — those share nearly identical
+    phrasing and would otherwise be mistaken for the program's own date.
+    Returns 'DD-MM-YYYY' or None.
+    """
+    for m in HEADER_DATE_RE.finditer(full_text):
+        preceding = full_text[max(0, m.start() - 20):m.start()]
+        if re.search(r'ARRIV[ÉE]E?\s*$', preceding, re.IGNORECASE):
+            continue
+        dd = m.group(1).zfill(2)
+        month_name = m.group(2).upper()
+        mm = FR_MONTHS.get(month_name)
+        if not mm:
+            continue
+        yyyy = m.group(3)
+        return f"{dd}-{mm}-{yyyy}"
+    return None
+
+
 def detect_discipline(full_text):
     """
     The PDF uses a different table schema per discipline. ATTELE (trot)

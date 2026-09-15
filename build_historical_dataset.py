@@ -34,13 +34,14 @@ import requests
 import pdfplumber
 import pandas as pd
 
-from pdf_parser import parse_race_card, extract_horse_comments, chrono_to_speed_index, extract_pdf_text_multi_strategy
+from pdf_parser import (parse_race_card, extract_horse_comments, chrono_to_speed_index,
+                         extract_pdf_text_multi_strategy, extract_program_own_date,
+                         FR_MONTHS, BET_LABEL)
 from main import build_todays_dataframe, FEATURE_COLS
 
 BASE_LIST_URL = "https://lonab.bf/programme-pmub"
 HISTORICAL_DB_PATH = "real_history_db.csv"
 CACHE_DIR = "backfill_cache"
-BET_LABEL = r'(?:"4\+1"|4\+1|"QUARTE"|QUARTE|"QUINTE\+"|QUINTE\+|"TIERCE"|TIERCE)'
 
 RECAP_RE = re.compile(
     rf'{BET_LABEL}\s+DU\s+\w+\s+(\d{{2}})[/\.](\d{{2}})[/\.](\d{{4}}).*?'
@@ -78,42 +79,6 @@ def fetch_pdf_text(url, headers):
     with open(cache_path, "w", encoding="utf-8") as f:
         f.write(full_text)
     return full_text
-
-
-FR_MONTHS = {
-    'JANVIER': '01', 'FEVRIER': '02', 'FÉVRIER': '02', 'MARS': '03', 'AVRIL': '04',
-    'MAI': '05', 'JUIN': '06', 'JUILLET': '07', 'AOUT': '08', 'AOÛT': '08',
-    'SEPTEMBRE': '09', 'OCTOBRE': '10', 'NOVEMBRE': '11', 'DECEMBRE': '12', 'DÉCEMBRE': '12',
-}
-
-HEADER_DATE_RE = re.compile(
-    rf'{BET_LABEL}\s+DU\s+\w+\s+(\d{{1,2}})\s+([A-ZÉÛ]+)\s+(\d{{4}})', re.IGNORECASE
-)
-
-
-def extract_program_own_date(full_text):
-    """
-    Reads the program's own date from its printed header, e.g.
-    '"QUARTE" DU MARDI 08 SEPTEMBRE 2026' -> '08-09-2026'.
-    Multiple bet-type labels are used interchangeably by LONAB ("4+1",
-    "QUARTE", "QUINTE+", "TIERCE") depending on the day's feature race.
-    Takes the FIRST such match that isn't itself an "ARRIVEE DU ..."
-    recap line further down the document — those share nearly identical
-    phrasing and would otherwise be mistaken for the program's own date.
-    Returns 'DD-MM-YYYY' or None.
-    """
-    for m in HEADER_DATE_RE.finditer(full_text):
-        preceding = full_text[max(0, m.start() - 20):m.start()]
-        if re.search(r'ARRIV[ÉE]E?\s*$', preceding, re.IGNORECASE):
-            continue  # this is a recap line, not the program's own header
-        dd = m.group(1).zfill(2)
-        month_name = m.group(2).upper()
-        mm = FR_MONTHS.get(month_name)
-        if not mm:
-            continue
-        yyyy = m.group(3)
-        return f"{dd}-{mm}-{yyyy}"
-    return None
 
 
 def extract_embedded_recaps(full_text):
@@ -172,7 +137,7 @@ def list_recent_program_urls(headers, max_pages=5):
 
 def backfill(days_back=60):
     headers = {"User-Agent": "Mozilla/5.0"}
-    db = pd.read_csv(HISTORICAL_DB_PATH) if os.path.exists(HISTORICAL_DB_PATH) else pd.DataFrame(columns=FEATURE_COLS + ["Is_Winner"])
+    db = pd.read_csv(HISTORICAL_DB_PATH) if os.path.exists(HISTORICAL_DB_PATH) else pd.DataFrame(columns=FEATURE_COLS + ["Race_Date", "Is_Winner"])
 
     # Track which race-dates we've already labeled, to avoid duplicate rows
     # on repeated runs. Stored as a companion file since real_history_db.csv
@@ -258,7 +223,8 @@ def backfill(days_back=60):
             print(f"  {date_key}: program text found but failed to parse into rows")
             continue
         df["Is_Winner"] = df["Num"].apply(lambda n: 1 if n in top5 else 0)
-        new_rows.append(df[FEATURE_COLS + ["Is_Winner"]])
+        df["Race_Date"] = date_key
+        new_rows.append(df[FEATURE_COLS + ["Race_Date", "Is_Winner"]])
         newly_labeled_dates.append(date_key)
 
     if skipped_already_seen:
