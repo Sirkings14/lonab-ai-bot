@@ -12,6 +12,7 @@ from lightgbm import LGBMClassifier
 
 from pdf_parser import (parse_race_card, extract_horse_comments, chrono_to_speed_index,
                          extract_pdf_text_multi_strategy, extract_program_own_date)
+from benter_score import score_race
 
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
@@ -182,6 +183,7 @@ def build_todays_dataframe(full_text):
             "Discipline_Attele": is_attele,
             "Draw": draw,
             "Weight_KG": weight_kg,
+            "Perf": row["Perf"],
         })
 
     df = pd.DataFrame(records)
@@ -204,6 +206,43 @@ def build_todays_dataframe(full_text):
         df["Speed_Rank_In_Race"] = 0.5
 
     return df
+
+
+KNOWN_TRACKS = [
+    "PARISLONGCHAMP", "LONGCHAMP", "PARIS-VINCENNES", "VINCENNES", "AUTEUIL",
+    "DEAUVILLE", "SAINT-CLOUD", "VICHY", "MARSEILLE-BORELY", "MARSEILLE-BORÉLY",
+    "CABOURG", "ENGHIEN", "CAGNES-SUR-MER", "DIEPPE", "CLAIREFONTAINE",
+]
+
+
+def extract_track_and_distance(full_text):
+    """
+    Pulls the track name and race distance from the header, e.g.
+    'AUTEUIL - PRIX JEAN BART - HAIES' and
+    '98 000 EUROS (ENV. 64 000 000 F CFA) - 3 600 METRES'
+    -> ('AUTEUIL', 3600.0)
+    Matches against a whitelist of known tracks rather than a generic
+    "first line shaped like X - Y" heuristic — the document's edition
+    line ('AN XXV - N° 44 462 - GRATUIT') has that same shape and was
+    being matched instead of the real track name.
+    Used only for the Benter-method surface-fit factor's known
+    track/distance patterns; returns (None, None) if not found rather
+    than guessing.
+    """
+    track = None
+    text_upper = full_text.upper()
+    for candidate in KNOWN_TRACKS:
+        if candidate in text_upper:
+            track = candidate
+            break
+    distance = None
+    m_dist = re.search(r'(\d[\d\s]*)\s*METRES', full_text)
+    if m_dist:
+        try:
+            distance = float(m_dist.group(1).replace(' ', ''))
+        except ValueError:
+            pass
+    return track, distance
 
 
 def run_predictions():
@@ -304,6 +343,15 @@ def run_predictions():
     todays_df["Prob_Val"] = calibrated_probs
     todays_df["Prob"] = np.round(calibrated_probs * 100, 1)
 
+    # Second, independent opinion: Kingsley-Benter rule-based scoring,
+    # computed directly from the eight weighted factors rather than
+    # learned from data. Deliberately a different lens on the same race —
+    # agreement between the two systems is a stronger signal than either
+    # one alone; disagreement is worth a manual look before staking.
+    comments_by_num = {r["Num"]: r["Comment"] for _, r in todays_df.iterrows()}
+    track_name, distance_m = extract_track_and_distance(full_text)
+    benter_df = score_race(todays_df, comments_by_num, track_name, distance_m)
+
     kelly_stakes = []
     is_value_list = []
 
@@ -323,6 +371,7 @@ def run_predictions():
 
     todays_df = todays_df.sort_values(by="Prob", ascending=False)
     todays_df.to_csv("todays_active_runners.csv", index=False)
+    benter_df.to_csv("todays_benter_scores.csv", index=False)
 
     top_list = todays_df["Horse"].tolist()
     top_3 = " - ".join(top_list[:3])
@@ -334,6 +383,32 @@ def run_predictions():
     msg += f"TOP 3 (TIERCE):\n{top_3}\n\n"
     msg += f"TOP 4 (QUARTE):\n{top_4}\n\n"
     msg += f"TOP 5 (QUINTE):\n{top_5}\n\n"
+
+    # Second opinion: Kingsley-Benter rule-based ranking, shown alongside
+    # the ML model's order rather than blended into it, so agreement and
+    # disagreement between the two systems stay visible.
+    benter_top5 = benter_df.head(5)
+    ml_top5_nums = set(todays_df.head(5)["Num"])
+    benter_top5_nums = set(benter_top5["Num"])
+    consensus_nums = ml_top5_nums & benter_top5_nums
+
+    msg += "KINGSLEY-BENTER METHOD (independent second opinion):\n"
+    for _, b in benter_top5.iterrows():
+        flag = " [CONSENSUS]" if b["Num"] in consensus_nums else ""
+        elim_note = f" [WOULD ELIMINATE: {b['Elimination_Reason']}]" if b["Eliminated"] else ""
+        msg += f"{b['Benter_Rank']}. {b['Horse']} — {b['Benter_Score']}/100{flag}{elim_note}\n"
+    msg += "\n"
+
+    eliminated = benter_df[benter_df["Eliminated"] == True]
+    if not eliminated.empty:
+        msg += "BENTER METHOD ELIMINATIONS (in either system's top 8):\n"
+        top8_nums = set(todays_df.head(8)["Num"]) | set(benter_df.head(8)["Num"])
+        for _, e in eliminated[eliminated["Num"].isin(top8_nums)].iterrows():
+            msg += f"- {e['Horse']}: {e['Elimination_Reason']}\n"
+        msg += "\n"
+
+    agreement_count = len(consensus_nums)
+    msg += f"Model/Method agreement: {agreement_count}/5 horses appear in both top-5 lists.\n\n"
 
     value_bets = todays_df[todays_df["Is_Value"] == True]
     if not value_bets.empty:
@@ -380,7 +455,19 @@ def collect_daily_results():
 
         for idx, row in todays_df.iterrows():
             num = str(row["Num"]).zfill(2)
-            is_win = 1 if (num in winning_numbers or num.lstrip("0") in winning_numbers) else 0
+            num_unpadded = num.lstrip("0")
+            is_win = 1 if (num in winning_numbers or num_unpadded in winning_numbers) else 0
+
+            # Exact finish position (1-5), not just top-5 membership — the
+            # arrival order IS the position, we were just discarding it
+            # before. This is what a real order-prediction model (rather
+            # than today's top-5-or-not classifier) would need to learn
+            # from, once enough of these accumulate.
+            finish_position = 0
+            if num in winning_numbers:
+                finish_position = winning_numbers.index(num) + 1
+            elif num_unpadded in winning_numbers:
+                finish_position = winning_numbers.index(num_unpadded) + 1
 
             # Reuse the SAME real per-horse features used for the morning
             # prediction (not hardcoded constants), so the database that
@@ -403,6 +490,7 @@ def collect_daily_results():
                 "Earnings_Rank_In_Race": row["Earnings_Rank_In_Race"],
                 "Speed_Rank_In_Race": row["Speed_Rank_In_Race"],
                 "Race_Date": datetime.utcnow().strftime("%d-%m-%Y"),
+                "Finish_Position": finish_position,
                 "Is_Winner": is_win
             })
 

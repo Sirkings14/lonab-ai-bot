@@ -137,7 +137,7 @@ def list_recent_program_urls(headers, max_pages=5):
 
 def backfill(days_back=60):
     headers = {"User-Agent": "Mozilla/5.0"}
-    db = pd.read_csv(HISTORICAL_DB_PATH) if os.path.exists(HISTORICAL_DB_PATH) else pd.DataFrame(columns=FEATURE_COLS + ["Race_Date", "Is_Winner"])
+    db = pd.read_csv(HISTORICAL_DB_PATH) if os.path.exists(HISTORICAL_DB_PATH) else pd.DataFrame(columns=FEATURE_COLS + ["Race_Date", "Finish_Position", "Is_Winner"])
 
     # Track which race-dates we've already labeled, to avoid duplicate rows
     # on repeated runs. Stored as a companion file since real_history_db.csv
@@ -223,8 +223,11 @@ def backfill(days_back=60):
             print(f"  {date_key}: program text found but failed to parse into rows")
             continue
         df["Is_Winner"] = df["Num"].apply(lambda n: 1 if n in top5 else 0)
+        # Exact finish position, same reasoning as main.py's live results
+        # collector: the arrival order IS the position, worth keeping.
+        df["Finish_Position"] = df["Num"].apply(lambda n: top5.index(n) + 1 if n in top5 else 0)
         df["Race_Date"] = date_key
-        new_rows.append(df[FEATURE_COLS + ["Race_Date", "Is_Winner"]])
+        new_rows.append(df[FEATURE_COLS + ["Race_Date", "Finish_Position", "Is_Winner"]])
         newly_labeled_dates.append(date_key)
 
     if skipped_already_seen:
