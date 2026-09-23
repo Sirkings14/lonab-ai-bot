@@ -178,6 +178,7 @@ def parse_race_card(full_text, n_runners, discipline=None):
     )
 
     rows_by_num = {}
+    scratched_nums = set()
     for line in full_text.split('\n'):
         line = line.strip()
         m = ROW_START_RE.match(line)
@@ -189,6 +190,16 @@ def parse_race_card(full_text, n_runners, discipline=None):
         except ValueError:
             continue
         if not (1 <= num_int <= n_runners):
+            continue
+
+        # Scratched horses ("non partant") print "N.P." in every data
+        # column instead of real values — none of the tail patterns can
+        # match that, and treating a scratch as a parse failure used to
+        # discard the ENTIRE race over one withdrawn horse. Detect it
+        # explicitly instead: 3+ "N.P." tokens on a horse's line means
+        # scratched, not malformed.
+        if rest.count('N.P.') >= 3 or 'NON PARTANT' in rest:
+            scratched_nums.add(num_str.zfill(2))
             continue
 
         for tail_name, pattern in ordered_patterns:
@@ -238,8 +249,12 @@ def parse_race_card(full_text, n_runners, discipline=None):
             }
             break  # stop trying other tail patterns for this line
 
-    if len(rows_by_num) < n_runners:
-        return []  # incomplete — don't return a partial, possibly-wrong race
+    # Require every NON-scratched horse to have parsed successfully —
+    # scratches are legitimate gaps, not parse failures.
+    expected_nums = {str(i).zfill(2) for i in range(1, n_runners + 1)}
+    missing = expected_nums - set(rows_by_num.keys()) - scratched_nums
+    if missing:
+        return []  # genuinely incomplete — don't return a partial, possibly-wrong race
 
     return [rows_by_num[str(i).zfill(2)] for i in range(1, n_runners + 1)
             if str(i).zfill(2) in rows_by_num]
@@ -349,3 +364,16 @@ if __name__ == "__main__":
     assert rows[15]["Horse"] == "LORELEY DES PLACES"
     assert rows[15]["Owner"] == "MP.LEJEUNE/L.AUBANEL"
     print("All checks passed against the exact raw pdfplumber output of a real uploaded PDF.")
+
+    # Regression test: a scratched ("non partant") horse must not sink
+    # the whole race — discovered on the real 24-Sep-2026 Compiègne card.
+    scratch_text = (
+        "01 KOHAKOU H.BOUTIN S.GAVILAN HA.FER.MARQUES H.3 7 60.KG 1.1.3.9.3 58 716 31/1 33/1\n"
+        "02 PERSIS G.TROLLEY DE PREVAUX S.GAVILAN D.VIDAL/A.RIVETTI F.3 10 60.KG 8.5.1.2.2 45 811 37/1 38/1\n"
+        "03 CAUDRY N.P. N.P. N.P. N.P. N.P. N.P. N.P. N.P. N.P.\n"
+        "04 IL MAGISTERO D.PROVOST M.CESANDRI M.BOULY H.3 9 58.KG 1.5.1.2.1 30 011 13/1 10/1\n"
+    )
+    scratch_rows = parse_race_card(scratch_text, 4)
+    assert len(scratch_rows) == 3, "Scratched horse should be excluded, not block the whole race"
+    assert {r["Num"] for r in scratch_rows} == {"01", "02", "04"}
+    print("[SCRATCH HANDLING] Non-partant horse correctly excluded without blocking the race.")
