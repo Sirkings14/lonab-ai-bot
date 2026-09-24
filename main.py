@@ -11,7 +11,7 @@ from sklearn.ensemble import RandomForestClassifier
 from lightgbm import LGBMClassifier
 
 from pdf_parser import (parse_race_card, extract_horse_comments, chrono_to_speed_index,
-                         extract_pdf_text_multi_strategy, extract_program_own_date)
+                         extract_pdf_text_multi_strategy, extract_program_own_date, detect_discipline)
 from benter_score import score_race
 
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
@@ -300,9 +300,36 @@ def run_predictions():
 
     todays_df = build_todays_dataframe(full_text)
     if todays_df is None or todays_df.empty:
+        # Rich diagnostics printed to the Action log (not the Telegram
+        # message, which stays short) — this is what was missing last
+        # time: the generic "layout may have changed" message gave no
+        # way to diagnose the ACTUAL cause without fetching the real PDF
+        # separately, which cost real back-and-forth to resolve before.
+        n_runners_match = re.search(r'(\d+)\s*CONCURRENTS', full_text, re.IGNORECASE)
+        detected_n = n_runners_match.group(1) if n_runners_match else None
+        disc = detect_discipline(full_text)
+        marker_count = full_text.count('N°')
+        print("=== PARSE FAILURE DIAGNOSTICS ===")
+        print(f"Discipline detected: {disc}")
+        print(f"CONCURRENTS match: {detected_n}")
+        print(f"'N°' occurrences in text: {marker_count}")
+        lines = [l.strip() for l in full_text.split('\n') if l.strip()]
+        marker_indices = [i for i, l in enumerate(lines) if l == 'N°']
+        if marker_indices:
+            for idx in marker_indices[:2]:
+                print(f"--- Lines around 'N°' at index {idx} ---")
+                for l in lines[max(0, idx - 2):idx + 20]:
+                    print(f"  {l!r}")
+        else:
+            print("No exact 'N°' line found. First 30 non-empty lines:")
+            for l in lines[:30]:
+                print(f"  {l!r}")
+        print("=== END DIAGNOSTICS ===")
+
         send_telegram_message(
             "LONAB AI Alert: Could not parse today's race table. "
-            "The PDF layout may have changed - needs a manual check."
+            "The PDF layout may have changed - needs a manual check. "
+            "(Full diagnostics printed in the Action run log.)"
         )
         return
 
