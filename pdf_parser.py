@@ -43,14 +43,14 @@ TAIL_PATTERNS = [
     ("PLAT_WITH_DRAW", re.compile(
         r'([HMF]\.\d{1,2})\s+'
         r'(\d{1,2})\s+'
-        r'(\d{1,3}(?:\.\d)?\.KG)\s+'
+        r'(\d{1,3}(?:[.,]\d)?\.KG)\s+'
         r'([0-9A-Za-z]+(?:\.[0-9A-Za-z]+){2,6})\s+'
         r'(\d{1,3}(?:\s\d{3})*)\s+'
         r'(\d{1,3}/1)\s+(\d{1,3}/1)\s*$'
     )),
     ("PLAT_NO_DRAW", re.compile(
         r'([HMF]\.\d{1,2})\s+'
-        r'(\d{1,3}(?:\.\d)?\.KG)\s+'
+        r'(\d{1,3}(?:[.,]\d)?\.KG)\s+'
         r'([0-9A-Za-z]+(?:\.[0-9A-Za-z]+){2,6})\s+'
         r'(\d{1,3}(?:\s\d{3})*)\s+'
         r'(\d{1,3}/1)\s+(\d{1,3}/1)\s*$'
@@ -218,12 +218,15 @@ def parse_race_card(full_text, n_runners, discipline=None):
             elif tail_name == 'PLAT_WITH_DRAW':
                 sex_age, draw, weight, perf, gains, odds1, odds2 = groups
                 chrono, dist_val = None, None
-                weight = float(weight.replace('.KG', ''))
+                # LONAB sometimes prints the decimal with a comma instead
+                # of a period ("64,5.KG" alongside "64.5.KG" elsewhere in
+                # the same document) — normalize before float() conversion.
+                weight = float(weight.replace('.KG', '').replace(',', '.'))
                 draw = int(draw)
             else:  # PLAT_NO_DRAW
                 sex_age, weight, perf, gains, odds1, odds2 = groups
                 chrono, dist_val, draw = None, None, None
-                weight = float(weight.replace('.KG', ''))
+                weight = float(weight.replace('.KG', '').replace(',', '.'))
 
             sex, age = sex_age.split('.')
             horse, jockey, trainer, owner = _split_names(names_blob)
@@ -377,3 +380,18 @@ if __name__ == "__main__":
     assert len(scratch_rows) == 3, "Scratched horse should be excluded, not block the whole race"
     assert {r["Num"] for r in scratch_rows} == {"01", "02", "04"}
     print("[SCRATCH HANDLING] Non-partant horse correctly excluded without blocking the race.")
+
+    # Regression test: comma-decimal weight ("64,5.KG" instead of
+    # "64.5.KG") — discovered on the real 06-Oct-2026 Auteuil card, where
+    # it appeared inconsistently alongside period-decimal weights in the
+    # SAME document. Broke every tail pattern, which then failed the
+    # whole race's completeness check (not a scratch, but treated as one
+    # by the old code since the horse simply never parsed).
+    comma_text = (
+        "01 LOUMINOS R.SCHMIDLIN GC.RUDOLF R.CORVELLER H.4 70.KG 8.7.1.0.A 134 680 18/1 20/1\n"
+        "02 FALCON JET K.NABET M.SEROR FAMILLE BRYANT H.4 64,5.KG 5.1.3.A.A 42 310 15/1 13/1\n"
+    )
+    comma_rows = parse_race_card(comma_text, 2)
+    assert len(comma_rows) == 2, "Comma-decimal weight should not break parsing"
+    assert comma_rows[1]["Weight_KG"] == 64.5
+    print("[COMMA-DECIMAL WEIGHT] Correctly normalized to 64.5, race not blocked.")
