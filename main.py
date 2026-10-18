@@ -7,8 +7,9 @@ import pandas as pd
 import numpy as np
 import requests
 import pdfplumber
-from sklearn.ensemble import RandomForestClassifier
-from lightgbm import LGBMClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import StandardScaler
 
 from pdf_parser import (parse_race_card, extract_horse_comments, chrono_to_speed_index,
                          extract_pdf_text_multi_strategy, extract_program_own_date, detect_discipline)
@@ -32,6 +33,30 @@ FEATURE_COLS = [
     "Discipline_Attele", "Draw", "Weight_KG",
     "Market_Rank_In_Race", "Earnings_Rank_In_Race", "Speed_Rank_In_Race"
 ]
+
+# Every row in the database stores all FEATURE_COLS (so features can be tested
+# as data grows), but production only USES features that have earned it.
+# Audit on 30 real races: odds alone scored 1.33/3 top-3 hits; adding features
+# lowered it, and the old RF+LightGBM ensemble was the worst (1.15). No single
+# feature improved on the odds beyond noise. So:
+#   champion   = the odds, calibrated into a real top-3 probability (safe baseline)
+#   challenger = odds + a few extra features
+# Both run on every race and both are scored in predictions/scorecard.csv.
+# Promote the challenger only when `python backtest.py` AND the forward
+# scorecard agree it beats the champion over enough races.
+CHAMPION_FEATURES = ["Market_Prob"]
+CHALLENGER_FEATURES = ["Market_Prob", "Market_Rank_In_Race", "Earnings_Rank_In_Race",
+                       "Driver_Rank", "Trainer_Rank", "Age"]
+
+
+def fit_top3_model(train_df, features, C=0.3):
+    """Regularized logistic regression for P(finishes top 3). One consistent
+    target for every race: LONAB's recaps list 3, 4 or 5 finishers depending on
+    the bet type, but the top 3 is always known (and is the tierce desordre)."""
+    y = train_df["Finish_Position"].between(1, 3).astype(int)
+    model = make_pipeline(StandardScaler(), LogisticRegression(C=C, max_iter=2000))
+    model.fit(train_df[features].astype(float), y)
+    return model
 
 
 def send_telegram_message(message):
@@ -341,37 +366,21 @@ def run_predictions():
         send_telegram_message("LONAB AI Error: Missing historical database.")
         return
 
-    X = db[FEATURE_COLS]
-    y = db["Is_Winner"]
-
-    # Regularized deliberately for a still-modest dataset (~400 rows as of
-    # this writing): the earlier config (max_depth=10, no min_samples_leaf)
-    # produced a suspicious ~0.99 cross-validated AUC on 66 rows — a
-    # textbook overfitting signal, not real skill. Shallower trees and a
-    # minimum leaf size keep the model from memorizing individual races.
-    rf_model = RandomForestClassifier(
-        n_estimators=300, random_state=42, max_depth=5,
-        min_samples_leaf=8, max_features='sqrt'
-    )
-    rf_model.fit(X, y)
-
-    lgb_model = LGBMClassifier(
-        n_estimators=150, learning_rate=0.03, max_depth=4,
-        min_child_samples=15, reg_alpha=0.1, reg_lambda=0.1,
-        random_state=42, verbose=-1
-    )
-    lgb_model.fit(X, y)
-
-    X_today = todays_df[FEATURE_COLS].astype(np.float64)
-
-    rf_probs = rf_model.predict_proba(X_today)[:, 1]
-    lgb_probs = lgb_model.predict_proba(X_today)[:, 1]
-    raw_ensemble_scores = (0.50 * rf_probs) + (0.50 * lgb_probs)
-
-    calibrated_probs = softmax_probabilities(raw_ensemble_scores, temperature=0.35)
-
-    todays_df["Prob_Val"] = calibrated_probs
-    todays_df["Prob"] = np.round(calibrated_probs * 100, 1)
+    # Only rows with a recorded finish position can teach top-3 (legacy rows
+    # that predate it are marked -1 and are excluded, not guessed at).
+    train = db[db["Finish_Position"] >= 0]
+    n_races_train = train["Race_Date"].nunique()
+    if len(train) >= 60 and n_races_train >= 5:
+        champion = fit_top3_model(train, CHAMPION_FEATURES)
+        challenger = fit_top3_model(train, CHALLENGER_FEATURES)
+        todays_df["Prob_Val"] = champion.predict_proba(todays_df[CHAMPION_FEATURES].astype(float))[:, 1]
+        todays_df["Challenger_Prob"] = challenger.predict_proba(todays_df[CHALLENGER_FEATURES].astype(float))[:, 1]
+    else:
+        # Not enough labeled races to fit anything: rank by the odds directly.
+        fallback = 3 * todays_df["Market_Prob"] / todays_df["Market_Prob"].sum()
+        todays_df["Prob_Val"] = fallback
+        todays_df["Challenger_Prob"] = fallback
+    todays_df["Prob"] = np.round(todays_df["Prob_Val"] * 100, 1)
 
     # Second, independent opinion: Kingsley-Benter rule-based scoring,
     # computed directly from the eight weighted factors rather than
@@ -409,10 +418,18 @@ def run_predictions():
     top_5 = " - ".join(top_list[:5])
 
     msg = f"LONAB QUANT AI PREDICTIONS\n"
-    msg += f"Engine: RF + LightGBM | Runners: {len(todays_df)}\n\n"
+    msg += f"Engine: odds-calibrated top-3 model (champion) | Runners: {len(todays_df)} | Trained on {n_races_train} races\n\n"
     msg += f"TOP 3 (TIERCE):\n{top_3}\n\n"
     msg += f"TOP 4 (QUARTE):\n{top_4}\n\n"
     msg += f"TOP 5 (QUINTE):\n{top_5}\n\n"
+
+    champ_top3 = todays_df.head(3)["Num"].tolist()
+    chall_top3 = todays_df.sort_values("Challenger_Prob", ascending=False).head(3)["Num"].tolist()
+    if set(champ_top3) != set(chall_top3):
+        names = todays_df.set_index("Num")["Horse"]
+        msg += "CHALLENGER (extra features) would pick: " + " - ".join(names[n] for n in chall_top3) + "\n\n"
+    else:
+        msg += "Challenger (extra features) agrees with the top 3.\n\n"
 
     # Second opinion: Kingsley-Benter rule-based ranking, shown alongside
     # the ML model's order rather than blended into it, so agreement and
@@ -440,7 +457,7 @@ def run_predictions():
     agreement_count = len(consensus_nums)
     msg += f"Model/Method agreement: {agreement_count}/5 horses appear in both top-5 lists.\n\n"
 
-    msg += "Top probabilities:\n"
+    msg += "Chance of finishing top-3 (calibrated from the odds):\n"
     for _, r in todays_df.head(8).iterrows():
         msg += f"- {r['Horse']} ({r['Driver']}): {r['Prob']}%\n"
     msg += "\nStake sizing is OFF until the model's probabilities are calibrated against the odds.\n"
@@ -544,7 +561,7 @@ def score_forward_test(runners_df, benter_df, arrival):
         return len(set(order[:k]) & target)
 
     winner = arrival[0]
-    return {
+    card = {
         "arrival": "-".join(arrival),
         "positions_scored": n_arr,
         "runners": len(runners_df),
@@ -559,6 +576,12 @@ def score_forward_test(runners_df, benter_df, arrival):
         "winner_market_rank": market_order.index(winner) + 1 if winner in market_order else None,
         "winner_benter_rank": benter_order.index(winner) + 1 if winner in benter_order else None,
     }
+    if "Challenger_Prob" in runners_df.columns:
+        chall_order = runners_df.sort_values("Challenger_Prob", ascending=False)["Num"].tolist()
+        card["challenger_top3_hits"] = hits(chall_order, 3, top3)
+        card["challenger_topN_hits"] = hits(chall_order, n_arr, topn)
+        card["winner_challenger_rank"] = chall_order.index(winner) + 1 if winner in chall_order else None
+    return card
 
 
 def collect_daily_results(race_date=None):
@@ -603,6 +626,7 @@ def collect_daily_results(race_date=None):
     runners["Finish_Position"] = runners["Num"].apply(lambda n: arrival.index(n) + 1 if n in arrival else 0)
     runners["Is_Winner"] = (runners["Finish_Position"] > 0).astype(int)
     runners["Race_Date"] = race_str
+    runners["Positions_Known"] = len(arrival)
 
     # Same feature columns and order as the database, so rows match exactly.
     new_rows = runners[[c for c in db.columns if c in runners.columns]]
@@ -624,7 +648,7 @@ def collect_daily_results(race_date=None):
     msg = f"LONAB RESULT & SCORECARD - {race_str}\n\n"
     msg += f"Official arrival: {' - '.join(arrival)}\n\n"
     msg += f"Top-3 picks that finished top-3 (out of 3):\n"
-    msg += f"- ML model: {card['model_top3_hits']}\n- Shortest odds: {card['market_top3_hits']}\n- Benter method: {card['benter_top3_hits']}\n\n"
+    msg += f"- Champion (calibrated odds): {card['model_top3_hits']}\n- Challenger (extra features): {card.get('challenger_top3_hits', 'n/a')}\n- Raw shortest odds: {card['market_top3_hits']}\n- Benter method: {card['benter_top3_hits']}\n\n"
     msg += (f"Where the winner ranked in each system's order: model #{card['winner_model_rank']}, "
             f"odds #{card['winner_market_rank']}, Benter #{card['winner_benter_rank']}\n\n")
     msg += f"Races scored so far: {n_races}. Database: {len(updated_db)} rows."
