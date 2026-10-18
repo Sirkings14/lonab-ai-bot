@@ -18,7 +18,10 @@ TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
 URL_PROGRAMS = "https://lonab.bf/programme-pmub"
-URL_RESULTS = "https://lonab.bf/resultats-et-rapports"
+URL_RESULTS = "https://lonab.bf/resultats-gains-pmub"
+RESULTS_FILES_BASE = "https://lonab.bf/sites/default/files"
+PREDICTIONS_DIR = "predictions"
+BACKFILLED_DATES_PATH = "backfilled_dates.txt"
 LOCAL_PDF_PATH = "todays_active_program.pdf"
 HISTORICAL_DB_PATH = "real_history_db.csv"
 STATS_DB_PATH = "driver_trainer_stats.csv"
@@ -379,28 +382,28 @@ def run_predictions():
     track_name, distance_m = extract_track_and_distance(full_text)
     benter_df = score_race(todays_df, comments_by_num, track_name, distance_m)
 
-    kelly_stakes = []
-    is_value_list = []
-
-    for idx, r in todays_df.iterrows():
-        ai_p = r["Prob_Val"]
-        odds = r["Odds"]
-        market_p = 1.0 / odds if odds > 0 else 0.05
-
-        stake = calculate_kelly_stake(ai_p, odds, fraction=0.25)
-        kelly_stakes.append(stake)
-
-        is_value = (ai_p > (market_p * 1.25)) and stake > 0
-        is_value_list.append(is_value)
-
-    todays_df["Kelly_Stake"] = kelly_stakes
-    todays_df["Is_Value"] = is_value_list
-
+    # Stake sizing and the "value overlay" are deliberately OFF. Audit of 30
+    # real races showed the model's probabilities are flatter than the odds,
+    # so longshots (25x+) were flagged as "value" 73% of the time purely as a
+    # calibration artifact, and Kelly sizing assumes calibrated probabilities.
+    # Re-enable only after the forward scorecard (predictions/scorecard.csv)
+    # shows real, calibrated edge. calculate_kelly_stake() is kept for then.
     todays_df = todays_df.sort_values(by="Prob", ascending=False)
-    todays_df.to_csv("todays_active_runners.csv", index=False)
-    benter_df.to_csv("todays_benter_scores.csv", index=False)
 
-    top_list = todays_df["Horse"].tolist()
+    # Persist this race's predictions under the RACE date (the program's own
+    # date, = tomorrow when this runs in the morning), so the evening job can
+    # score them. Previously these were written to a temp GitHub machine and
+    # lost, which is why the evening job never had anything to learn from.
+    os.makedirs(PREDICTIONS_DIR, exist_ok=True)
+    todays_df.to_csv(os.path.join(PREDICTIONS_DIR, f"runners_{expected_date}.csv"), index=False)
+    benter_df.to_csv(os.path.join(PREDICTIONS_DIR, f"benter_{expected_date}.csv"), index=False)
+
+    elim_nums = set(benter_df.loc[benter_df["Eliminated"] == True, "Num"])
+
+    def tag(row):
+        return row["Horse"] + (" (BENTER: ELIMINATE)" if row["Num"] in elim_nums else "")
+
+    top_list = [tag(r) for _, r in todays_df.iterrows()]
     top_3 = " - ".join(top_list[:3])
     top_4 = " - ".join(top_list[:4])
     top_5 = " - ".join(top_list[:5])
@@ -423,7 +426,7 @@ def run_predictions():
     for _, b in benter_top5.iterrows():
         flag = " [CONSENSUS]" if b["Num"] in consensus_nums else ""
         elim_note = f" [WOULD ELIMINATE: {b['Elimination_Reason']}]" if b["Eliminated"] else ""
-        msg += f"{b['Benter_Rank']}. {b['Horse']} — {b['Benter_Score']}/100{flag}{elim_note}\n"
+        msg += f"{b['Benter_Rank']}. {b['Horse']} — {round(b['Benter_Score'], 1)}/100{flag}{elim_note}\n"
     msg += "\n"
 
     eliminated = benter_df[benter_df["Eliminated"] == True]
@@ -437,106 +440,195 @@ def run_predictions():
     agreement_count = len(consensus_nums)
     msg += f"Model/Method agreement: {agreement_count}/5 horses appear in both top-5 lists.\n\n"
 
-    value_bets = todays_df[todays_df["Is_Value"] == True]
-    if not value_bets.empty:
-        msg += "VALUE OVERLAY BETS IDENTIFIED:\n"
-        for _, v in value_bets.iterrows():
-            msg += f"- {v['Horse']} | Odds: {v['Odds']}x | AI Prob: {v['Prob']}% | Stake: {v['Kelly_Stake']}% Bankroll\n"
-        msg += "\n"
-    else:
-        msg += "Market Value Check: No major market mispricings detected today.\n\n"
-
-    msg += "Full Probabilities & Kelly Allocations:\n"
+    msg += "Top probabilities:\n"
     for _, r in todays_df.head(8).iterrows():
-        stake_str = f" | Stake: {r['Kelly_Stake']}%" if r['Kelly_Stake'] > 0 else ""
-        msg += f"- {r['Horse']} ({r['Driver']}): {r['Prob']}%{stake_str}\n"
+        msg += f"- {r['Horse']} ({r['Driver']}): {r['Prob']}%\n"
+    msg += "\nStake sizing is OFF until the model's probabilities are calibrated against the odds.\n"
 
     send_telegram_message(msg)
 
 
-def collect_daily_results():
-    print("=== EVENING WORKFLOW: SCRAPING OFFICIAL RESULTS ===")
-    if not os.path.exists("todays_active_runners.csv"):
-        print("No active runner data found to match results.")
+FR_MONTH_NAMES = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet",
+                  "août", "septembre", "octobre", "novembre", "décembre"]
+
+
+def parse_arrival_text(text):
+    """
+    Extracts the official finishing order from a LONAB results sheet.
+    Verified against real sheets of both formats:
+      QUARTE: "ARR : 8 - 14 - 9 - 4 NPO :00 NP: 00"        (4 numbers)
+      4+1:    "ARR : 12-11-14-16-7 NPO : 17 NP:00"         (5 numbers)
+    Returns zero-padded strings in finishing order, or [].
+    """
+    m = re.search(r'ARR\s*:\s*([\d\s\-\u2013]+)', text)
+    if not m:
+        return []
+    return [n.zfill(2) for n in re.findall(r'\d{1,2}', m.group(1))]
+
+
+def results_candidate_urls(race_dt):
+    """Direct file URLs, pattern confirmed on real files
+    (Res41_21_12_2025.pdf, Res_29_06_2026_QUARTE.pdf)."""
+    dd, mm, yyyy = race_dt.strftime("%d"), race_dt.strftime("%m"), race_dt.strftime("%Y")
+    folder = f"{RESULTS_FILES_BASE}/{yyyy}-{mm}"
+    return [
+        f"{folder}/Res41_{dd}_{mm}_{yyyy}.pdf",
+        f"{folder}/Res_{dd}_{mm}_{yyyy}_QUARTE.pdf",
+    ]
+
+
+def find_results_pdf_via_listing(race_dt, headers):
+    """Fallback if the direct filename guess misses (e.g. a new naming
+    variant): find the day's results page on the listing, then its PDF.
+    NOTE: written from the observed page structure; not yet exercised
+    against the live listing HTML."""
+    try:
+        listing = requests.get(URL_RESULTS, headers=headers, timeout=30)
+        soup = BeautifulSoup(listing.text, "html.parser")
+        date_str = f"{race_dt.strftime('%d')} {FR_MONTH_NAMES[race_dt.month - 1]} {race_dt.year}".lower()
+        for a in soup.find_all("a", href=True):
+            if date_str in a.get_text(" ", strip=True).lower():
+                node_url = urllib.parse.urljoin(URL_RESULTS, a["href"])
+                node = requests.get(node_url, headers=headers, timeout=30)
+                node_soup = BeautifulSoup(node.text, "html.parser")
+                for link in node_soup.find_all("a", href=True):
+                    if link["href"].lower().endswith(".pdf") and "res" in link["href"].lower():
+                        return urllib.parse.urljoin(node_url, link["href"])
+    except Exception as e:
+        print(f"Listing fallback failed: {e}")
+    return None
+
+
+def fetch_official_arrival(race_dt, headers):
+    """Returns (arrival_numbers, source_url) or ([], None) if not published yet."""
+    urls = results_candidate_urls(race_dt)
+    fallback = None
+    for attempt in range(2):
+        for url in urls:
+            try:
+                res = requests.get(url, headers=headers, timeout=30)
+            except Exception as e:
+                print(f"Could not fetch {url}: {e}")
+                continue
+            if res.status_code != 200 or not res.content.startswith(b"%PDF"):
+                continue
+            with open("tmp_results.pdf", "wb") as f:
+                f.write(res.content)
+            with pdfplumber.open("tmp_results.pdf") as pdf:
+                text = "\n".join((p.extract_text() or "") for p in pdf.pages)
+            os.remove("tmp_results.pdf")
+            arrival = parse_arrival_text(text)
+            if len(arrival) >= 3:
+                return arrival, url
+        if attempt == 0:
+            fallback = find_results_pdf_via_listing(race_dt, headers)
+            if not fallback:
+                break
+            urls = [fallback]
+    return [], None
+
+
+def score_forward_test(runners_df, benter_df, arrival):
+    """
+    One scorecard row: how did each system's picks do on this race, out of
+    sample (predictions were made the morning before, with this race not yet
+    in the training data)?
+    """
+    n_arr = len(arrival)
+    top3, topn = set(arrival[:3]), set(arrival)
+    model_order = runners_df.sort_values("Prob_Val", ascending=False)["Num"].tolist()
+    market_order = runners_df.sort_values("Market_Prob", ascending=False)["Num"].tolist()
+    benter_order = benter_df.sort_values("Benter_Rank")["Num"].tolist()
+
+    def hits(order, k, target):
+        return len(set(order[:k]) & target)
+
+    winner = arrival[0]
+    return {
+        "arrival": "-".join(arrival),
+        "positions_scored": n_arr,
+        "runners": len(runners_df),
+        "discipline": runners_df["Discipline"].iloc[0],
+        "model_top3_hits": hits(model_order, 3, top3),
+        "market_top3_hits": hits(market_order, 3, top3),
+        "benter_top3_hits": hits(benter_order, 3, top3),
+        "model_topN_hits": hits(model_order, n_arr, topn),
+        "market_topN_hits": hits(market_order, n_arr, topn),
+        "benter_topN_hits": hits(benter_order, n_arr, topn),
+        "winner_model_rank": model_order.index(winner) + 1 if winner in model_order else None,
+        "winner_market_rank": market_order.index(winner) + 1 if winner in market_order else None,
+        "winner_benter_rank": benter_order.index(winner) + 1 if winner in benter_order else None,
+    }
+
+
+def collect_daily_results(race_date=None):
+    """
+    Evening job. Scores the race run TODAY (predicted yesterday morning), adds
+    its labeled rows to the training database, and appends a scorecard row.
+
+    Fixes vs the original (which never produced a single commit):
+    - reads predictions saved by date (the morning job now commits them),
+    - fetches the real results PDFs (not a page that doesn't exist),
+    - stamps the true race date, and is idempotent (safe to run twice).
+    """
+    print("=== EVENING WORKFLOW: SCORING TODAY'S RACE ===")
+    race_dt = race_date or datetime.utcnow()
+    race_str = race_dt.strftime("%d-%m-%Y")
+
+    runners_path = os.path.join(PREDICTIONS_DIR, f"runners_{race_str}.csv")
+    benter_path = os.path.join(PREDICTIONS_DIR, f"benter_{race_str}.csv")
+    if not os.path.exists(runners_path):
+        print(f"No saved predictions for {race_str} (no race today, or none were made). Nothing to score.")
+        return
+
+    db = load_real_dataset()
+    if db is None:
+        return
+    if (db["Race_Date"].astype(str) == race_str).any():
+        print(f"{race_str} is already in the database. Nothing to do.")
         return
 
     headers = {"User-Agent": "Mozilla/5.0"}
-    try:
-        res = requests.get(URL_RESULTS, headers=headers)
-        soup = BeautifulSoup(res.text, "html.parser")
-        text_content = soup.get_text()
+    arrival, source_url = fetch_official_arrival(race_dt, headers)
+    if not arrival:
+        print(f"Official results for {race_str} not published yet. A later scheduled run will retry.")
+        return
+    print(f"Official arrival for {race_str}: {arrival} (from {source_url})")
 
-        arrival_match = re.search(r'(?:Arrivee|Arrivée|ARRIVEE)\s*:?\s*([\d\s\-\xe2\x80\x93]+)', text_content)
-        if not arrival_match:
-            print("Official results not yet published on LONAB.")
-            return
+    runners = pd.read_csv(runners_path, dtype={"Num": str})
+    runners["Num"] = runners["Num"].str.zfill(2)
+    benter = pd.read_csv(benter_path, dtype={"Num": str})
+    benter["Num"] = benter["Num"].str.zfill(2)
 
-        winning_numbers = re.findall(r'\b\d{1,2}\b', arrival_match.group(1))[:5]
-        print(f"Official Winning Numbers Scraped: {winning_numbers}")
+    runners["Finish_Position"] = runners["Num"].apply(lambda n: arrival.index(n) + 1 if n in arrival else 0)
+    runners["Is_Winner"] = (runners["Finish_Position"] > 0).astype(int)
+    runners["Race_Date"] = race_str
 
-        if not winning_numbers:
-            return
+    # Same feature columns and order as the database, so rows match exactly.
+    new_rows = runners[[c for c in db.columns if c in runners.columns]]
+    updated_db = pd.concat([db, new_rows], ignore_index=True)
+    updated_db.to_csv(HISTORICAL_DB_PATH, index=False)
+    with open(BACKFILLED_DATES_PATH, "a") as f:   # so the weekly backfill doesn't add it twice
+        f.write(race_str + "\n")
 
-        todays_df = pd.read_csv("todays_active_runners.csv")
-        new_records = []
+    # Forward scorecard: the only genuinely out-of-sample record of how the
+    # system performs. Review this, not the backtest, before trusting stakes.
+    card = score_forward_test(runners, benter, arrival)
+    card_row = pd.DataFrame([{"race_date": race_str, **card}])
+    card_path = os.path.join(PREDICTIONS_DIR, "scorecard.csv")
+    if os.path.exists(card_path):
+        card_row = pd.concat([pd.read_csv(card_path), card_row], ignore_index=True)
+    card_row.to_csv(card_path, index=False)
 
-        for idx, row in todays_df.iterrows():
-            num = str(row["Num"]).zfill(2)
-            num_unpadded = num.lstrip("0")
-            is_win = 1 if (num in winning_numbers or num_unpadded in winning_numbers) else 0
-
-            # Exact finish position (1-5), not just top-5 membership — the
-            # arrival order IS the position, we were just discarding it
-            # before. This is what a real order-prediction model (rather
-            # than today's top-5-or-not classifier) would need to learn
-            # from, once enough of these accumulate.
-            finish_position = 0
-            if num in winning_numbers:
-                finish_position = winning_numbers.index(num) + 1
-            elif num_unpadded in winning_numbers:
-                finish_position = winning_numbers.index(num_unpadded) + 1
-
-            # Reuse the SAME real per-horse features used for the morning
-            # prediction (not hardcoded constants), so the database that
-            # trains tomorrow's model matches what the model actually saw.
-            new_records.append({
-                "Earnings": row["Earnings"],
-                "Age": row["Age"],
-                "Shoe_Status": row["Shoe_Status"],
-                "Driver_Rank": row["Driver_Rank"],
-                "Trainer_Rank": row["Trainer_Rank"],
-                "Days_Rest": row["Days_Rest"],
-                "DQ_Rate": row["DQ_Rate"],
-                "Speed_Index": row["Speed_Index"],
-                "Autostart_Pos": row["Autostart_Pos"],
-                "Market_Prob": row["Market_Prob"],
-                "Discipline_Attele": row["Discipline_Attele"],
-                "Draw": row["Draw"],
-                "Weight_KG": row["Weight_KG"],
-                "Market_Rank_In_Race": row["Market_Rank_In_Race"],
-                "Earnings_Rank_In_Race": row["Earnings_Rank_In_Race"],
-                "Speed_Rank_In_Race": row["Speed_Rank_In_Race"],
-                "Race_Date": datetime.utcnow().strftime("%d-%m-%Y"),
-                "Finish_Position": finish_position,
-                "Is_Winner": is_win
-            })
-
-        if new_records:
-            new_df = pd.DataFrame(new_records)
-            db = load_real_dataset()
-            if db is not None:
-                updated_db = pd.concat([db, new_df], ignore_index=True)
-                updated_db.to_csv(HISTORICAL_DB_PATH, index=False)
-
-                print(f"Added {len(new_records)} real outcomes to historical database!")
-
-                msg = f"LONAB AI AUTO-LEARNING UPDATE\n\n"
-                msg += f"Official Arrivee: {' - '.join(winning_numbers)}\n"
-                msg += f"Added today's race matrix to AI memory. Total database size: {len(updated_db)} records."
-                send_telegram_message(msg)
-
-    except Exception as e:
-        print(f"Error collecting results: {e}")
+    n_races = len(card_row)
+    msg = f"LONAB RESULT & SCORECARD - {race_str}\n\n"
+    msg += f"Official arrival: {' - '.join(arrival)}\n\n"
+    msg += f"Top-3 picks that finished top-3 (out of 3):\n"
+    msg += f"- ML model: {card['model_top3_hits']}\n- Shortest odds: {card['market_top3_hits']}\n- Benter method: {card['benter_top3_hits']}\n\n"
+    msg += (f"Where the winner ranked in each system's order: model #{card['winner_model_rank']}, "
+            f"odds #{card['winner_market_rank']}, Benter #{card['winner_benter_rank']}\n\n")
+    msg += f"Races scored so far: {n_races}. Database: {len(updated_db)} rows."
+    send_telegram_message(msg)
 
 
 if __name__ == "__main__":
