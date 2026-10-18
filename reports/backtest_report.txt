@@ -1,0 +1,30 @@
+30 real races, 470 runners (target: finished top 3)
+(a random pick of 3 horses gets about 0.57 of 3 right)
+
+candidate                       top-3 hits/3     AUC   vs champion (+/- std err)
+raw odds ranking (no model)            1.333   0.758   +0.000 +/- 0.000
+CHAMPION  (calibrated odds)            1.333   0.758   
+CHALLENGER (odds + extras)             1.250   0.749   -0.083 +/- 0.039
+all 16 features                        1.167   0.722   -0.167 +/- 0.082
+
+Odds + one feature at a time (change vs odds alone; real only if > 2 std err):
+feature                      d hits   +/- se    d AUC
+Earnings_Rank_In_Race        +0.004    0.009  -0.0064
+Driver_Rank                  +0.000    0.000  -0.0042
+Days_Rest                    +0.000    0.000  -0.0065
+Speed_Index                  +0.000    0.000  -0.0006
+Discipline_Attele            +0.000    0.000  +0.0005
+Market_Rank_In_Race          +0.000    0.000  +0.0025
+Speed_Rank_In_Race           +0.000    0.000  -0.0027
+Draw                         -0.004    0.004  -0.0036
+Shoe_Status                  -0.025    0.030  -0.0067
+DQ_Rate                      -0.025    0.030  -0.0054
+Earnings                     -0.029    0.029  -0.0011
+Age                          -0.033    0.033  -0.0009
+Trainer_Rank                 -0.033    0.031  -0.0035
+Weight_KG                    -0.033    0.033  +0.0004
+Autostart_Pos                -0.067    0.067  -0.0101
+
+VERDICT
+Challenger is clearly WORSE than the champion (-0.083). Extra features are adding noise.
+Based on 30 races. More races shrink the error bars; this is the number to watch.
