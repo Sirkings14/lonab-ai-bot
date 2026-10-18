@@ -1,0 +1,41 @@
+name: Evaluate Model (manual)
+
+# Run this whenever you want an honest check of the model against the odds.
+# It saves a plain-text report into the repo (reports/backtest_report.txt).
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run backtest
+        shell: bash
+        run: |
+          mkdir -p reports
+          python backtest.py 2>&1 | tee reports/backtest_report.txt
+
+      - name: Save report
+        run: |
+          git config user.name "LONAB AI Bot"
+          git config user.email "bot@lonab-ai.com"
+          git add reports/
+          git commit -m "Update backtest report [skip ci]" || exit 0
+          git pull --rebase origin main
+          git push
