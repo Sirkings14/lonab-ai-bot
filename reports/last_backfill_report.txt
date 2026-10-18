@@ -1,0 +1,80 @@
+Listing pages gave 56 programs.
+Probed 346 dates by filename; now 376 programs, 387 dates with an embedded recap.
+Skipped 76 race(s):
+  01-10-2025: recaps contradict each other: [['07', '13', '03', '04', '51'], ['07', '13', '03', '04', '51'], ['07', '13', '03', '04', '05'], ['07', '13', '03', '04', '05']]
+  02-08-2026: no program fetched for that date
+  03-01-2026: no program fetched for that date
+  03-03-2026: program found but could not be parsed
+  03-04-2026: program found but could not be parsed
+  04-01-2026: no program fetched for that date
+  04-09-2026: program found but could not be parsed
+  04-10-2025: no program fetched for that date
+  04-12-2025: program found but could not be parsed
+  05-05-2026: no program fetched for that date
+  05-10-2025: recaps contradict each other: [['11', '17', '04', '01', '61'], ['11', '17', '04', '01', '61'], ['11', '17', '04', '01', '06'], ['11', '17', '04', '01', '06']]
+  05-11-2025: no program fetched for that date
+  06-05-2026: no program fetched for that date
+  07-03-2026: program found but could not be parsed
+  07-05-2026: no program fetched for that date
+  08-08-2026: program found but could not be parsed
+  08-10-2025: program found but could not be parsed
+  08-12-2025: program found but could not be parsed
+  09-04-2026: no program fetched for that date
+  09-07-2026: arrival ['03', '07', '08', '01', '15'] contains numbers not in parsed field
+  09-09-2026: no program fetched for that date
+  09-11-2025: recaps contradict each other: [['04', '09', '16', '01', '51'], ['04', '09', '16', '01', '51'], ['04', '09', '16', '01', '05'], ['04', '09', '16', '01', '05']]
+  09-12-2025: program found but could not be parsed
+  10-03-2026: no program fetched for that date
+  10-06-2026: program found but could not be parsed
+  10-09-2025: no program fetched for that date
+  10-10-2025: no program fetched for that date
+  11-06-2026: no program fetched for that date
+  11-07-2026: no program fetched for that date
+  11-09-2025: no program fetched for that date
+  12-05-2026: no program fetched for that date
+  12-09-2025: no program fetched for that date
+  12-10-2026: program found but could not be parsed
+  13-08-2026: program found but could not be parsed
+  13-09-2025: no program fetched for that date
+  14-04-2026: program found but could not be parsed
+  14-05-2026: program found but could not be parsed
+  14-08-2026: program found but could not be parsed
+  14-11-2025: arrival ['06', '10', '09', '14', '71'] contains numbers not in parsed field
+  15-11-2025: program found but could not be parsed
+  16-02-2025: no program fetched for that date
+  16-10-2025: program found but could not be parsed
+  16-12-2025: arrival ['01', '07', '02', '09', '22'] contains numbers not in parsed field
+  17-06-2026: no program fetched for that date
+  18-02-2026: program found but could not be parsed
+  18-04-2026: program found but could not be parsed
+  18-10-2025: program found but could not be parsed
+  19-04-2026: no program fetched for that date
+  19-10-2025: program found but could not be parsed
+  20-07-2026: program found but could not be parsed
+  20-09-2025: no program fetched for that date
+  21-08-2026: program found but could not be parsed
+  21-10-2025: program found but could not be parsed
+  21-12-2025: program found but could not be parsed
+  22-02-2026: no program fetched for that date
+  22-03-2026: program found but could not be parsed
+  22-08-2026: program found but could not be parsed
+  23-08-2026: program found but could not be parsed
+  23-10-2025: program found but could not be parsed
+  23-11-2025: program found but could not be parsed
+  24-01-2026: program found but could not be parsed
+  24-10-2025: program found but could not be parsed
+  24-11-2025: no program fetched for that date
+  25-09-2026: program found but could not be parsed
+  25-10-2025: program found but could not be parsed
+  26-11-2025: program found but could not be parsed
+  27-02-2026: program found but could not be parsed
+  27-10-2025: program found but could not be parsed
+  28-03-2026: program found but could not be parsed
+  28-05-2026: no program fetched for that date
+  28-08-2026: program found but could not be parsed
+  28-12-2025: no program fetched for that date
+  29-11-2025: recaps contradict each other: [['15', '13', '71', '15'], ['15', '13', '71'], ['15', '13', '07'], ['15', '13', '07']]
+  30-09-2025: program found but could not be parsed
+  30-09-2026: program found but could not be parsed
+  31-05-2026: program found but could not be parsed
+Added 4023 rows from 258 races. Database: 4890 rows.
