@@ -25,6 +25,9 @@ from sklearn.preprocessing import StandardScaler
 from main import (FEATURE_COLS, CHAMPION_FEATURES, CHALLENGER_FEATURES,
                   HISTORICAL_DB_PATH)
 
+BENTER_FACTORS = ["Form_Score", "Course_Score", "Confidence_Score", "Shoeing_Score",
+                  "Draw_Score", "Jockey_Score", "Surface_Score"]
+
 warnings.filterwarnings("ignore")
 N_SHUFFLES = 8
 MIN_RACES = 8
@@ -49,6 +52,8 @@ def evaluate(D, candidates):
             for name, feats in candidates.items():
                 if feats is None:
                     test["p"] = test["Market_Prob"]
+                elif isinstance(feats, tuple):          # ("rank", column): rank straight by a score
+                    test["p"] = test[feats[1]]
                 else:
                     model = logistic().fit(train[feats].astype(float), train["y"])
                     test["p"] = model.predict_proba(test[feats].astype(float))[:, 1]
@@ -105,7 +110,44 @@ def main():
         flag = "  <-- adds signal" if diff > 2 * se else ("  <-- HURTS" if diff < -2 * se else "")
         print(f"{f:26}{diff:>+9.3f}{se:>9.3f}{dauc:>+9.4f}{flag}")
 
+    # ---- The Kingsley-Benter method itself --------------------------------
+    if "Benter_Score" in D.columns and D["Benter_Score"].notna().any():
+        B = D[D["Benter_Score"].notna()].reset_index(drop=True)
+        nb = B["Race_Date"].nunique()
+        if nb >= MIN_RACES:
+            print(f"\n--- KINGSLEY-BENTER METHOD test ({nb} races that have stored Benter scores) ---")
+            bc = {
+                "raw odds ranking (no model)": None,
+                "CHAMPION  (calibrated odds)": CHAMPION_FEATURES,
+                "Benter ranking ALONE": ("rank", "Benter_Score"),
+                "odds + Benter total": CHAMPION_FEATURES + ["Benter_Score"],
+            }
+            br = evaluate(B, bc)
+            bchamp = br["CHAMPION  (calibrated odds)"]["race_hits"]
+            print(f"{'candidate':30}{'top-3 hits/3':>14}{'AUC':>8}   vs champion (+/- std err)")
+            for name, r in br.items():
+                diff, se = paired(r["race_hits"], bchamp)
+                tail = "" if name.startswith("CHAMPION") else f"{diff:+.3f} +/- {se:.3f}"
+                print(f"{name:30}{r['race_hits'].mean():>14.3f}{r['auc']:>8.3f}   {tail}")
+            fac = evaluate(B, {f: CHAMPION_FEATURES + [f] for f in BENTER_FACTORS})
+            print(f"\nEach of the eight factors, added to the odds (real only if > 2 std err):")
+            print(f"{'factor':22}{'d hits':>9}{'+/- se':>9}{'d AUC':>9}")
+            frows = []
+            for f, r in fac.items():
+                diff, se = paired(r["race_hits"], bchamp)
+                frows.append((f, diff, se, r["auc"] - br["CHAMPION  (calibrated odds)"]["auc"]))
+            for f, diff, se, dauc in sorted(frows, key=lambda x: -x[1]):
+                flag = "  <-- adds signal" if diff > 2 * se else ("  <-- HURTS" if diff < -2 * se else "")
+                print(f"{f:22}{diff:>+9.3f}{se:>9.3f}{dauc:>+9.4f}{flag}")
+        else:
+            print(f"\n(Benter scores stored for only {nb} races so far; run the rebuild to score the whole archive.)")
+    else:
+        print("\n(No Benter scores stored yet. Run the rebuild to compute them for the whole archive.)")
+
     diff, se = paired(named_res["CHALLENGER (odds + extras)"]["race_hits"], champ)
+    print("\nNote: with ~20 things tested, about 1 in 20 will cross 2 std err by pure chance (a noise-only")
+    print("test of this script produced exactly one such false flag). Treat a single flag as a lead to")
+    print("confirm on more races, never as proof.")
     print("\nVERDICT")
     if diff > 2 * se:
         print(f"Challenger beats the champion ({diff:+.3f} hits/race, > 2 std err). Worth promoting.")
