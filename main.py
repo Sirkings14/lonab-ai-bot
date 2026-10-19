@@ -13,7 +13,7 @@ from sklearn.preprocessing import StandardScaler
 
 from pdf_parser import (parse_race_card, extract_horse_comments, chrono_to_speed_index,
                          extract_pdf_text_multi_strategy, extract_program_own_date, detect_discipline)
-from benter_score import score_race
+from benter_score import score_race, BENTER_COLS
 
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
@@ -622,6 +622,13 @@ def collect_daily_results(race_date=None):
     runners["Num"] = runners["Num"].str.zfill(2)
     benter = pd.read_csv(benter_path, dtype={"Num": str})
     benter["Num"] = benter["Num"].str.zfill(2)
+
+    # Attach the Kingsley-Benter scores saved that morning, so the method is
+    # stored per runner and can be backtested like everything else.
+    benter["Benter_Eliminated"] = benter["Eliminated"].astype(int)
+    keep = ["Num"] + [c for c in BENTER_COLS if c in benter.columns]
+    runners = runners.drop(columns=[c for c in keep if c != "Num" and c in runners.columns]).merge(
+        benter[keep], on="Num", how="left")
 
     runners["Finish_Position"] = runners["Num"].apply(lambda n: arrival.index(n) + 1 if n in arrival else 0)
     runners["Is_Winner"] = (runners["Finish_Position"] > 0).astype(int)
