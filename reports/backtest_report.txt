@@ -1,30 +1,36 @@
-288 real races, 4493 runners (target: finished top 3)
+294 real races, 4587 runners (target: finished top 3)
 (a random pick of 3 horses gets about 0.58 of 3 right)
 
 candidate                       top-3 hits/3     AUC   vs champion (+/- std err)
-raw odds ranking (no model)            1.167   0.713   +0.000 +/- 0.000
-CHAMPION  (calibrated odds)            1.167   0.713   
-CHALLENGER (odds + extras)             1.143   0.713   -0.024 +/- 0.016
-all 16 features                        1.155   0.714   -0.012 +/- 0.021
+raw odds ranking (no model)            1.163   0.714   +0.000 +/- 0.000
+CHAMPION  (calibrated odds)            1.163   0.714   
+CHALLENGER (odds + extras)             1.144   0.713   -0.019 +/- 0.016
+all 16 features                        1.153   0.715   -0.011 +/- 0.020
 
 Odds + one feature at a time (change vs odds alone; real only if > 2 std err):
 feature                      d hits   +/- se    d AUC
-Autostart_Pos                +0.016    0.009  +0.0001
-Days_Rest                    +0.003    0.006  -0.0010
-Earnings                     +0.000    0.005  -0.0002
+Autostart_Pos                +0.015    0.007  +0.0000  <-- adds signal
+Days_Rest                    +0.002    0.005  -0.0010
+Earnings                     +0.000    0.005  -0.0000
 Discipline_Attele            +0.000    0.000  +0.0002
 Market_Rank_In_Race          +0.000    0.000  -0.0026
-Driver_Rank                  -0.002    0.010  -0.0006
-Earnings_Rank_In_Race        -0.002    0.004  -0.0015
+Earnings_Rank_In_Race        -0.000    0.004  -0.0008
+Driver_Rank                  -0.002    0.009  -0.0008
 Speed_Index                  -0.003    0.003  -0.0003
-Age                          -0.004    0.006  +0.0008
-Draw                         -0.005    0.005  -0.0010
+Draw                         -0.005    0.005  -0.0011
+Age                          -0.006    0.005  +0.0006
 Weight_KG                    -0.007    0.005  +0.0003
-Trainer_Rank                 -0.012    0.009  +0.0005
-DQ_Rate                      -0.014    0.014  -0.0009
-Speed_Rank_In_Race           -0.014    0.007  -0.0007
-Shoe_Status                  -0.020    0.013  -0.0011
+Trainer_Rank                 -0.013    0.010  +0.0002
+DQ_Rate                      -0.013    0.014  -0.0008
+Speed_Rank_In_Race           -0.015    0.007  -0.0008  <-- HURTS
+Shoe_Status                  -0.018    0.013  -0.0010
+
+(Benter scores stored for only 6 races so far; run the rebuild to score the whole archive.)
+
+Note: with ~20 things tested, about 1 in 20 will cross 2 std err by pure chance (a noise-only
+test of this script produced exactly one such false flag). Treat a single flag as a lead to
+confirm on more races, never as proof.
 
 VERDICT
-No real difference yet (-0.024 +/- 0.016). Keep the champion; the extra features have not earned a place.
-Based on 288 races. More races shrink the error bars; this is the number to watch.
+No real difference yet (-0.019 +/- 0.016). Keep the champion; the extra features have not earned a place.
+Based on 294 races. More races shrink the error bars; this is the number to watch.
