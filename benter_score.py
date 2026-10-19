@@ -21,6 +21,12 @@ wrong one when no clear signal is found.
 import re
 
 
+# Columns stored per runner in the training database, so the method (and each
+# of its eight factors) can be backtested against the odds.
+BENTER_COLS = ["Benter_Score", "Benter_Rank", "Benter_Eliminated", "Form_Score", "Course_Score",
+               "Confidence_Score", "Shoeing_Score", "Draw_Score", "Jockey_Score",
+               "Surface_Score", "Value_Gap_Score"]
+
 TRAINER_CONFIDENCE_MAX = [
     "tous les feux sont au vert", "c'est son année", "confiant", "confiante",
 ]
