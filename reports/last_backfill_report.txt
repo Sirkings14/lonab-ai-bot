@@ -1,80 +1,73 @@
 Listing pages gave 56 programs.
-Probed 346 dates by filename; now 376 programs, 387 dates with an embedded recap.
-Skipped 76 race(s):
-  01-10-2025: recaps contradict each other: [['07', '13', '03', '04', '51'], ['07', '13', '03', '04', '51'], ['07', '13', '03', '04', '05'], ['07', '13', '03', '04', '05']]
+Probed 345 dates by filename; now 375 programs, 386 dates with an embedded recap.
+Skipped 69 race(s):
   02-08-2026: no program fetched for that date
   03-01-2026: no program fetched for that date
-  03-03-2026: program found but could not be parsed
-  03-04-2026: program found but could not be parsed
+  03-03-2026: program found but could not be parsed (discipline=PLAT, CONCURRENTS=16, rows matched=15, scratched=0, missing=['14'], UNMATCHED ROWS: [1 - CENTRAL PARK WEST : Ce véritable modèle de 9 - SATURDAY NIGHT : Surprenante lauréate (à 53/1 !); 14 MELBORA F. VALLE SKAR E. MIKHALIDES SANG. BLOODSTOCK LTD F.6 1 53,5.KG 0.4.0.6.3. 126 613 23/1 22/1])
+  03-04-2026: program found but could not be parsed (discipline=ATTELE, CONCURRENTS=13, rows matched=12, scratched=0, missing=['04'], UNMATCHED ROWS: [6 - FRANCO FLEURI : Dans le Quinté+ du 19 février, "QUARTE" DU LUNDI 30/03/2026 Ordre : 1 516 000 F (30 G); 04 INITIALE HERAULT P.PH. PLOQUIN Antoine LHERETE P. OURADOU F.8 2 700.M 1.11.30 D.1.0.0.0. 197 600 12/1 11/1])
   04-01-2026: no program fetched for that date
-  04-09-2026: program found but could not be parsed
+  04-09-2026: program found but could not be parsed (discipline=ATTELE, CONCURRENTS=15, rows matched=14, scratched=0, missing=['01'], UNMATCHED ROWS: [1 LOULIANA DE VANDEL R. MARTY J.M. BAUDOUIN EC. J.M BAUDOUIN F.5 2850.M 1.12.50 6.4.D.3.3 70 670 60/ 63/1])
   04-10-2025: no program fetched for that date
-  04-12-2025: program found but could not be parsed
+  04-12-2025: program found but could not be parsed (discipline=ATTELE, CONCURRENTS=13, rows matched=12, scratched=0, missing=['09'], UNMATCHED ROWS: [9 HYMNE DU GERS J.M. BAZIRE N. BAZIRE EC. J.MRANCOULE H.8 2 100.M 1.11.20 1.8.7.0.9. 498 010 57/1 60/1])
   05-05-2026: no program fetched for that date
-  05-10-2025: recaps contradict each other: [['11', '17', '04', '01', '61'], ['11', '17', '04', '01', '61'], ['11', '17', '04', '01', '06'], ['11', '17', '04', '01', '06']]
   05-11-2025: no program fetched for that date
   06-05-2026: no program fetched for that date
-  07-03-2026: program found but could not be parsed
+  07-03-2026: program found but could not be parsed (discipline=PLAT, CONCURRENTS=16, rows matched=15, scratched=0, missing=['07'], UNMATCHED ROWS: [03  BOULLAT J.PHELIPPE M.SEROR D.SEROR F.6 69.KG 1.9.1.7.4 176 540 19/1 17/1 11/1 10/1 17/1 35/1 36/1 8/1 48/1 13/1 16/1 26/1 4/1 8/1 27/1 43/1 31/1 23/1; 07 AULKO A.LEPAGE G.JUILLET M.FROGER H.8 68.KG 0.9.1.1.1 130305 46/1 48/1; 14 MAZARIN DU BERLAIS A.GAUTRON ROB.COLLET EC. BLACK & WHITE H.6 62,5.KG 5.6.A.A.3 107 805 42/1 43/1 ZONE-TURF.FR 11 - 2 - 4 - 12 - 6 - 1 - 9 - 3 - 8])
   07-05-2026: no program fetched for that date
-  08-08-2026: program found but could not be parsed
-  08-10-2025: program found but could not be parsed
-  08-12-2025: program found but could not be parsed
+  08-08-2026: program found but could not be parsed (discipline=PLAT, CONCURRENTS=16, rows matched=14, scratched=0, missing=['04', '05'], UNMATCHED ROWS: [04 MARHARRY M.GUYON G.HERNON P.VAN BELLE H.5 11 59.5 kg 4.1.7.2.6 69 799 10/1 8/1; 05 AMIDARGENT PC.BOUDOT M.PITART E.KRAHENBUHL H.4 5 59.5 kg 8.7.0.0.0 39 214 12/1 10/1])
+  08-10-2025: program found but could not be parsed (discipline=ATTELE, CONCURRENTS=16, rows matched=15, scratched=0, missing=['15'], UNMATCHED ROWS: [])
+  08-12-2025: program found but could not be parsed (discipline=PLAT, CONCURRENTS=16, rows matched=15, scratched=0, missing=['06'], UNMATCHED ROWS: [06 APANIIWA C.LEFEBVRE Y.FOUIN RACING 53 F.5 68,5KG 4.6.9.7.0 169 160 16/1 17/1])
   09-04-2026: no program fetched for that date
-  09-07-2026: arrival ['03', '07', '08', '01', '15'] contains numbers not in parsed field
   09-09-2026: no program fetched for that date
-  09-11-2025: recaps contradict each other: [['04', '09', '16', '01', '51'], ['04', '09', '16', '01', '51'], ['04', '09', '16', '01', '05'], ['04', '09', '16', '01', '05']]
-  09-12-2025: program found but could not be parsed
+  09-12-2025: program found but could not be parsed (discipline=PLAT, CONCURRENTS=16, rows matched=15, scratched=0, missing=['11'], UNMATCHED ROWS: [11 ZELMAN M.FAVRIAUX AS&D.ALLARD AS&D.AS&D.ALLARD H.4 12 57.GK 6.5.2.5.7 109 566 16/1 18/1])
   10-03-2026: no program fetched for that date
-  10-06-2026: program found but could not be parsed
-  10-09-2025: no program fetched for that date
+  10-06-2026: program found but could not be parsed (discipline=ATTELE, CONCURRENTS=18, rows matched=16, scratched=0, missing=['02', '14'], UNMATCHED ROWS: [2 KIWI DE CONNEE Y. LEBOURGEOIS CH.A. MALLET EC.Ch. MALLET H.6 2450.M 1.12.60 7.1.1.4.4 10 9 675 11/1 8/1; 14 HAPPY DU BOIS M. HERRAULT E. PLANCHENAULT J.P. MALLET H.9 2475.M 11.11.30 7.1.3.2.6 227 680 97/1 99/1])
   10-10-2025: no program fetched for that date
   11-06-2026: no program fetched for that date
   11-07-2026: no program fetched for that date
   11-09-2025: no program fetched for that date
   12-05-2026: no program fetched for that date
   12-09-2025: no program fetched for that date
-  12-10-2026: program found but could not be parsed
-  13-08-2026: program found but could not be parsed
+  12-10-2026: program found but could not be parsed (discipline=PLAT, CONCURRENTS=16, rows matched=0, scratched=0, missing=['01', '02', '03', '04', '05', '06', '07', '08'], UNMATCHED ROWS: [01 BAYAMOON F.VERON J.REYNIER UNDER BLUE SKY M.5 7 60,5.kg 2.0.8.1.1 103 244 13/1 10/1; 02 WINDFLOWER H.BESNIER P.COTTIER EC. GRIBOMONT/EC. DU SUD F.4 10 60.kg 4.7.5.2.1 68 314 12/1 9/1; 03 MORPHEWAN T.PICCONE P.COTTIER D.DUMOULIN M.6 8 59,5.kg 6.1.4.7.0 258 728 8/1 5/1])
+  13-08-2026: program found but could not be parsed (discipline=PLAT, CONCURRENTS=16, rows matched=15, scratched=0, missing=['07'], UNMATCHED ROWS: [07 CANADIAN B.MARIE A.KARKOSA F.KAHRAMAN M.3 5 59.KG 1.0.6.6. 13 607 20/1 23/1])
   13-09-2025: no program fetched for that date
-  14-04-2026: program found but could not be parsed
-  14-05-2026: program found but could not be parsed
-  14-08-2026: program found but could not be parsed
-  14-11-2025: arrival ['06', '10', '09', '14', '71'] contains numbers not in parsed field
-  15-11-2025: program found but could not be parsed
+  14-04-2026: program found but could not be parsed (discipline=PLAT, CONCURRENTS=16, rows matched=0, scratched=0, missing=['01', '02', '03', '04', '05', '06', '07', '08'], UNMATCHED ROWS: [01 PROFUMO DI IENA C. DEMURO M. GUARNIERI LA. MORARI F.4 7 61.KG 1.2.6.0.5 71.434 8/1 6/1; 02 OZAN A. LEMAITRE G. DOLEUZE C. STEPHENSON H.8 1 61.KG 0.0.9.4.1 188.760 21/1 24/1; 03 FOU FURIEUX A. MADAMET N. CAULLERY D. R. LODGE/B.L.JONES M.5 6 60.KG 9.8.1.2.4 134.270 23/1 22/1])
+  14-05-2026: program found but could not be parsed (discipline=PLAT, CONCURRENTS=16, rows matched=15, scratched=0, missing=['11'], UNMATCHED ROWS: [11 CITY BABE C.DEMURO S.WATTEL I.CORBANI F.4 14 54,5KG 9.8.5.5.5 7 410 14/1 11/1])
+  14-08-2026: program found but could not be parsed (discipline=ATTELE, CONCURRENTS=14, rows matched=13, scratched=0, missing=['14'], UNMATCHED ROWS: [14 MAYFLOWER P.E. COLLARD St. PROVOOST EC.DANOVER H.4 2050.M 1.17.50 8 0 80/1 83/1])
+  15-11-2025: program found but could not be parsed (discipline=PLAT, CONCURRENTS=16, rows matched=15, scratched=0, missing=['07'], UNMATCHED ROWS: [07 IRON BARKS G.BOINARD M.PITART JPJ .DUBOIS H.5 69.KG 4.1.1.4.A 90020 37/1 39/1])
   16-02-2025: no program fetched for that date
-  16-10-2025: program found but could not be parsed
-  16-12-2025: arrival ['01', '07', '02', '09', '22'] contains numbers not in parsed field
+  16-10-2025: program found but could not be parsed (discipline=PLAT, CONCURRENTS=16, rows matched=15, scratched=0, missing=['03'], UNMATCHED ROWS: [03 DIVINE CHRISNAT S.RUIS CH.PLISSON M.PEHU F.5 8 59.5KG 0.6.6.0.4 122 181 43/1 40/1])
   17-06-2026: no program fetched for that date
-  18-02-2026: program found but could not be parsed
-  18-04-2026: program found but could not be parsed
-  18-10-2025: program found but could not be parsed
+  18-02-2026: program found but could not be parsed (discipline=PLAT, CONCURRENTS=16, rows matched=15, scratched=0, missing=['06'], UNMATCHED ROWS: [06 MAX VERST H.BOUTIN R.FRADET G. RACING H.7 14 57.GK 4.0.3.5.1 198 326 19/1 16/1])
+  18-04-2026: program found but could not be parsed (discipline=ATTELE, CONCURRENTS=13, rows matched=12, scratched=0, missing=['09'], UNMATCHED ROWS: [9 FELLOW WISE AS N. BAZIRE N. BAZIRE Gennaro RICCIO M.5 2 150.M 1.09.20 5.7.9.D.D. 211 868 38/1 40/1])
+  18-10-2025: program found but could not be parsed (discipline=PLAT, CONCURRENTS=14, rows matched=13, scratched=0, missing=['01'], UNMATCHED ROWS: [01 POLYRISK B.GELHAY F.ALLONCLE F.ALLONCLE H.6 72.KG 1.6.4.0.5. 117 750 9/1 8/1])
   19-04-2026: no program fetched for that date
-  19-10-2025: program found but could not be parsed
-  20-07-2026: program found but could not be parsed
+  19-10-2025: program found but could not be parsed (discipline=PLAT, CONCURRENTS=16, rows matched=15, scratched=0, missing=['11'], UNMATCHED ROWS: [11 ACOTANGO H.BOUTIN M.BOUTIN B.COLLET H.4 1 55.KG 2.5.2.3.3. 53 400 12/1 9/1])
+  20-07-2026: program found but could not be parsed (discipline=PLAT, CONCURRENTS=16, rows matched=15, scratched=0, missing=['16'], UNMATCHED ROWS: [16 WAZIERS D.BREUX F.FORESI EC. CH.BRIDAULT F.6 5 53,5.KG 2.3.7.8.2 132798 7/1 10/1])
   20-09-2025: no program fetched for that date
-  21-08-2026: program found but could not be parsed
-  21-10-2025: program found but could not be parsed
-  21-12-2025: program found but could not be parsed
+  21-08-2026: program found but could not be parsed (discipline=ATTELE, CONCURRENTS=16, rows matched=15, scratched=0, missing=['03'], UNMATCHED ROWS: [3 EXPRESS D'ARC M. MOTTIER H.E. BONDO CHELSEA SRLS H.6 2750.M 1.10.80 D.D.9.8.5. 185 252 28/1 31/1])
+  21-10-2025: program found but could not be parsed (discipline=PLAT, CONCURRENTS=16, rows matched=15, scratched=0, missing=['14'], UNMATCHED ROWS: [14 RAM SEA S. PASQUIER G.BIETOLINI KL. RAMSEY H.3 5 57,5.KG 0.2.1.5.5. 14 640 12/1 15/1])
+  21-12-2025: program found but could not be parsed (discipline=ATTELE, CONCURRENTS=18, rows matched=17, scratched=0, missing=['15'], UNMATCHED ROWS: [15 KEEP GOING M. MOTTIER M. MOTTIER J. DAVET M.5 2700.M 1.09.20 2.D.0.1.1. 659 060 8/1 5/1])
   22-02-2026: no program fetched for that date
-  22-03-2026: program found but could not be parsed
-  22-08-2026: program found but could not be parsed
-  23-08-2026: program found but could not be parsed
-  23-10-2025: program found but could not be parsed
-  23-11-2025: program found but could not be parsed
-  24-01-2026: program found but could not be parsed
-  24-10-2025: program found but could not be parsed
+  22-03-2026: program found but could not be parsed (discipline=PLAT, CONCURRENTS=15, rows matched=14, scratched=0, missing=['14'], UNMATCHED ROWS: [14 PERSYAMBRE G. MASURE CHAILLE-CHAILLE & PAMART D. CLOS H.7 62,5..KG 3.7.2.0.6 97 435 10/1 8/1])
+  22-08-2026: program found but could not be parsed (discipline=PLAT, CONCURRENTS=16, rows matched=15, scratched=0, missing=['10'], UNMATCHED ROWS: [10 MAJOR OAK S.PASQUIER MF.WEISSMEIER STALL HEXENBERG H.6 6 56,5KG 9.4.5.8.5 158 314 16/1 13/1])
+  23-08-2026: program found but could not be parsed (discipline=PLAT, CONCURRENTS=15, rows matched=13, scratched=0, missing=['01', '02'], UNMATCHED ROWS: [01 DRUMARD PC.BOUDOT E.LIBAUD HYPERION SARL M.5 6 61.KG 5.5.3.1.6. 113 010 14/1 11/1; 02 TIEGO THE FIRST M.GUYON P&J.BRANDT STALL PERLEN M.4 9 59,5.KG 4.4.5.2.8. 104 636 11/1 9/1])
+  23-10-2025: program found but could not be parsed (discipline=PLAT, CONCURRENTS=13, rows matched=12, scratched=0, missing=['01'], UNMATCHED ROWS: [6 - JOST : Bon troisième lors de sa rentrée à "4+1" DU DIMANCHE 19/10/2025 Ordre : 65 429 000 F (1 G); 01 JAPON A.ZULIANI F.NICOLLE A.JATHIERE H.6 72.KG 7.6.2.8.1 187100 18/1 20/1])
+  23-11-2025: program found but could not be parsed (discipline=PLAT, CONCURRENTS=16, rows matched=15, scratched=0, missing=['07'], UNMATCHED ROWS: [03 MILY SPEED K.NABET Y.FOUIN L.GAGNEUX F.4 69.KG 6.1.5.5.1 71 080 23/1 25/1 60/1 7/1 25/1 15/1 3/1 27/1 16/1 14/1 20/1 11/1 33/1 18/1 37/1 5/1 32/1 72/1; 07 LE ROI LOTH L.ZULIANI Y.FOUIN F.DUVIVIER H.4 67.KG 1.4.A.3.9 61440 18/1 16/1; 14 LILETTE C.LEFEBVRE M.PITART LG BLOODSTOCK F.4 66.KG 3.5.2.1 32 515 7/1 5/1 ZONE-TURF.FR 2 - 13 - 5 - 10 - 12 - 9 - 3 - 14 - 15])
+  24-01-2026: program found but could not be parsed (discipline=ATTELE, CONCURRENTS=15, rows matched=14, scratched=0, missing=['15'], UNMATCHED ROWS: [15 CHANCE EK G. GELORMINI F. BARELLI E. LOZZI F8 2 100.M 1.10.40 7.0.1.9.6 389 824 52/1 55/1])
+  24-10-2025: program found but could not be parsed (discipline=ATTELE, CONCURRENTS=16, rows matched=15, scratched=0, missing=['09'], UNMATCHED ROWS: [9 IGRISONI S. HOUYVET S. HOUYVET TH.GIROUARD H.7 2 875.M 1.11.00 5.2.6.1.1. 216 065 11/1 10/1])
   24-11-2025: no program fetched for that date
-  25-09-2026: program found but could not be parsed
-  25-10-2025: program found but could not be parsed
-  26-11-2025: program found but could not be parsed
-  27-02-2026: program found but could not be parsed
-  27-10-2025: program found but could not be parsed
-  28-03-2026: program found but could not be parsed
+  25-09-2026: program found but could not be parsed (discipline=ATTELE, CONCURRENTS=18, rows matched=17, scratched=0, missing=['14'], UNMATCHED ROWS: [14 GUILI GUILI D. THOMAIN F. TERRY Y.M. DESAUNETTE H.10 2850.M 11.13.20 4.7.0.6.D 189 700 27/1 25/1])
+  25-10-2025: program found but could not be parsed (discipline=PLAT, CONCURRENTS=15, rows matched=13, scratched=0, missing=['01', '09'], UNMATCHED ROWS: [01 MOHICAN E.BONNET J.CARAYON BAIE DES ANGES H.5 72.KG 7.7.4.1.3. 164 985 19/1 17/1; 09 KIKOUNETTE G.MEUNIER H.MERIENNE G.VACHER F.5 67.KG 9.4.3.3.A. 122 410 23/1 20/1])
+  26-11-2025: program found but could not be parsed (discipline=PLAT, CONCURRENTS=16, rows matched=15, scratched=0, missing=['01'], UNMATCHED ROWS: [01 MAJOR OAK R.MANGIONE MF.WEISSMEIER ST. HEXENBERG H.5 6 61.GK 0.9.4.0.1 152 861 23/1 20/1])
+  27-02-2026: program found but could not be parsed (discipline=ATTELE, CONCURRENTS=16, rows matched=15, scratched=0, missing=['02'], UNMATCHED ROWS: [2 KID BELLAY P.PH. PLOQUIN J.M. BAUDOUIN EC. du HS. D'ERABLE M.6 2 700.M 1.12.50 0.D.D..D.2 329 065 42/1 44/1])
+  27-10-2025: program found but could not be parsed (discipline=PLAT, CONCURRENTS=16, rows matched=14, scratched=1, missing=['09'], UNMATCHED ROWS: [09 PRECIOSO T.PICCONE HA.PANTALL P.RECHSTEINER M.3 10 58,5.KG 0.5.4.0.0. 29 908 27/1 28/1])
+  28-03-2026: program found but could not be parsed (discipline=PLAT, CONCURRENTS=16, rows matched=15, scratched=0, missing=['07'], UNMATCHED ROWS: [03 AIN ROB.COLLET EC.CMV DARBY STABLE H.7 70,5.KG 9.T.2.3.4 447 370 40/1 37/1 6/1 9/1 37/1 13/1 31/1 10/1 15/1 5/1 34/1 38/1 18/1 23/1 11/1 8/1 55/1 27/1; 07 TATOO B.LE CLERC F.BELLEMERE F.BELLEMERE H.6 69.KG 1.A.0.2.4 116930 17/1 15/1; 09 PABLO L.ZULIANI C.BONIN EC.DU TRIANGLE H.6 67,5.KG 7.7.4.0.3 56 780 34/1 34/1 CHAMPAGNE-ARDENNES-PRESSE 8 - 5 - 14 - 1 - 6 - 13 - 2 - 7])
   28-05-2026: no program fetched for that date
-  28-08-2026: program found but could not be parsed
+  28-08-2026: program found but could not be parsed (discipline=ATTELE, CONCURRENTS=16, rows matched=15, scratched=0, missing=['03'], UNMATCHED ROWS: [03 JUSSIEU PIYA F. LAGADEUC N. VIEL-PIERRE N. VIEL-PIERRE H.7 2850.M 1.14.4 0.1.6.D.3 54 835 59/1 61/1])
   28-12-2025: no program fetched for that date
-  29-11-2025: recaps contradict each other: [['15', '13', '71', '15'], ['15', '13', '71'], ['15', '13', '07'], ['15', '13', '07']]
-  30-09-2025: program found but could not be parsed
-  30-09-2026: program found but could not be parsed
-  31-05-2026: program found but could not be parsed
-Added 4023 rows from 258 races. Database: 4890 rows.
+  29-11-2025: recaps disagree early or have too few positions: [['15', '13', '71', '15'], ['15', '13', '71']]
+  30-09-2025: program found but could not be parsed (discipline=PLAT, CONCURRENTS=16, rows matched=15, scratched=0, missing=['16'], UNMATCHED ROWS: [16 LA CEIBA C.DEMURO G. HERNON C.LAN.MEURINNE F.3 9 56,5.KG 2.3.6.1.5 34 524 5/1 4 / 1])
+  30-09-2026: program found but could not be parsed (discipline=ATTELE, CONCURRENTS=15, rows matched=14, scratched=0, missing=['04'], UNMATCHED ROWS: [4 HURRICANE CARTER Y. LEBOURGEOIS S. RAIMOND S. RAIMOND H.9 2850.M 1.09.7 0.2.D.7.3 446 120 50/1 53/1])
+  31-05-2026: program found but could not be parsed (discipline=PLAT, CONCURRENTS=16, rows matched=14, scratched=0, missing=['01', '13'], UNMATCHED ROWS: [01 DARYZAN M.BARZALONA FH.GRAFFARD AGA KHAN STUDS SC M.3 10 58.KG 1 12 350 7/1 6/1; 13 CANADIAN T.BACHELOT A.KARKOSA F.KAHRAMAN M.3 4 58.KG 6.6 1 257 137/1 140/1])
+Added 94 rows from 6 races. Database: 4984 rows.
