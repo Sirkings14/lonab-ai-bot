@@ -34,8 +34,9 @@ import pdfplumber
 import pandas as pd
 
 from pdf_parser import (extract_pdf_text_multi_strategy, extract_program_own_date,
-                        FR_MONTHS, BET_LABEL)
-from main import build_todays_dataframe, FEATURE_COLS
+                        FR_MONTHS, BET_LABEL, ROW_START_RE, TAIL_PATTERNS, detect_discipline)
+from main import build_todays_dataframe, FEATURE_COLS, get_n_runners, extract_track_and_distance
+from benter_score import score_race, BENTER_COLS
 
 BASE_LIST_URL = "https://lonab.bf/programme-pmub"
 FILES_BASE = "https://lonab.bf/sites/default/files"
@@ -45,7 +46,7 @@ ARCHIVE_DIR = "archive"
 CACHE_DIR = "backfill_cache"
 HEADERS = {"User-Agent": "Mozilla/5.0"}
 
-DB_COLUMNS = FEATURE_COLS + ["Race_Date", "Positions_Known", "Finish_Position", "Is_Winner"]
+DB_COLUMNS = FEATURE_COLS + BENTER_COLS + ["Race_Date", "Positions_Known", "Finish_Position", "Is_Winner"]
 
 # Filename variants actually seen on lonab.bf for program PDFs. LONAB is not
 # consistent (hyphen vs underscore, a missing "B", a missing "DU"), which is
@@ -164,15 +165,17 @@ def list_listing_urls(max_pages=6):
 
 
 def resolve_recaps(candidates):
-    """All recap lists seen for one date must agree on their common prefix
-    (e.g. a 4-number QUARTE sheet vs a 5-number 4+1 line). Returns the longest
-    consistent list, or None if two sources contradict each other."""
-    ordered = sorted(candidates, key=len, reverse=True)
-    longest = ordered[0]
-    for other in ordered[1:]:
-        if other != longest[:len(other)]:
-            return None
-    return longest
+    """Several copies of a recap can disagree only at the TAIL (a stray digit
+    from a line break turned "5" into "51" in real documents). Keep the longest
+    run of positions that every copy agrees on. Disagreement early in the list
+    leaves fewer than 3 agreed positions, and the race is skipped by the caller."""
+    prefix = list(candidates[0])
+    for other in candidates[1:]:
+        k = 0
+        while k < min(len(prefix), len(other)) and prefix[k] == other[k]:
+            k += 1
+        prefix = prefix[:k]
+    return prefix
 
 
 def gather_sources(days_back):
@@ -206,6 +209,34 @@ def gather_sources(days_back):
     return program_texts, recaps
 
 
+def diagnose_unparsed(text):
+    """Why did this program fail to parse? Returns a one-line summary with the
+    raw row lines that matched no known layout, so the report itself shows
+    exactly what needs teaching to the parser."""
+    n_match = re.search(r'(\d+)\s*CONCURRENTS', text, re.IGNORECASE)
+    n = int(n_match.group(1)) if n_match else None
+    discipline = detect_discipline(text)
+    matched, scratched, unmatched = set(), set(), []
+    for line in text.split("\n"):
+        m = ROW_START_RE.match(line.strip())
+        if not m:
+            continue
+        num, rest = m.group(1), m.group(2)
+        if n is not None and not (1 <= int(num) <= n):
+            continue
+        if rest.count("N.P.") >= 3 or "NON PARTANT" in rest:
+            scratched.add(num.zfill(2))
+        elif any(p.search(rest) for _, p in TAIL_PATTERNS):
+            matched.add(num.zfill(2))
+        elif re.search(r"\d+/\d+", rest):          # looks like a data row, not prose
+            unmatched.append(f"{num} {rest[-150:]}")
+    expected = {str(i).zfill(2) for i in range(1, (n or 0) + 1)}
+    missing = sorted(expected - matched - scratched)
+    sample = "; ".join(dict.fromkeys(unmatched[:3]))
+    return (f"discipline={discipline}, CONCURRENTS={n}, rows matched={len(matched)}, scratched={len(scratched)}, "
+            f"missing={missing[:8]}, UNMATCHED ROWS: [{sample}]")
+
+
 def label_races(program_texts, recaps, skip_dates=()):
     """Turn every date that has BOTH a program and a consistent recap into
     labeled rows. Returns (DataFrame, {date: reason} for skipped races)."""
@@ -217,22 +248,33 @@ def label_races(program_texts, recaps, skip_dates=()):
             skipped[date_key] = "no program fetched for that date"
             continue
         arrival = resolve_recaps(lists)
-        if arrival is None:
-            skipped[date_key] = f"recaps contradict each other: {lists}"
-            continue
         if len(arrival) < 3:
-            skipped[date_key] = f"only {len(arrival)} positions in the recap"
+            skipped[date_key] = f"recaps disagree early or have too few positions: {lists[:2]}"
             continue
         df = build_todays_dataframe(program_texts[date_key])
         if df is None or df.empty:
-            skipped[date_key] = "program found but could not be parsed"
+            skipped[date_key] = "program found but could not be parsed (" + diagnose_unparsed(program_texts[date_key]) + ")"
             continue
         # Integrity check: every horse in the official arrival must be a runner
-        # we parsed. If not, the program and recap are misaligned (or a horse
-        # was mis-parsed) and the labels would be wrong, so skip, never guess.
-        if not set(arrival) <= set(df["Num"]):
-            skipped[date_key] = f"arrival {arrival} contains numbers not in parsed field"
+        # we parsed. A bad number can only be trusted away from the top of the
+        # list if everything before it is clean: truncate at the first
+        # impossible number if >= 3 clean positions remain, otherwise skip.
+        field = set(df["Num"])
+        clean = []
+        for n in arrival:
+            if n not in field:
+                break
+            clean.append(n)
+        if len(clean) < 3:
+            skipped[date_key] = f"arrival {arrival} has numbers not in the parsed field within the top 3"
             continue
+        arrival = clean
+        # Kingsley-Benter scores, computed exactly as in the live morning run.
+        comments = {r["Num"]: r["Comment"] for _, r in df.iterrows()}
+        track, dist = extract_track_and_distance(program_texts[date_key])
+        b = score_race(df, comments, track, dist)
+        b["Benter_Eliminated"] = b["Eliminated"].astype(int)
+        df = df.merge(b[["Num"] + [c for c in BENTER_COLS if c in b.columns]], on="Num", how="left")
         df["Finish_Position"] = df["Num"].apply(lambda n: arrival.index(n) + 1 if n in arrival else 0)
         df["Is_Winner"] = (df["Finish_Position"] > 0).astype(int)
         df["Positions_Known"] = len(arrival)
@@ -298,7 +340,7 @@ def rebuild(days_back=400, min_races=10):
     kept = existing_dated[~existing_dated["Race_Date"].isin(set(rebuilt["Race_Date"]))].copy()
     if "Positions_Known" not in kept.columns or kept["Positions_Known"].isna().any():
         kept["Positions_Known"] = kept.groupby("Race_Date")["Finish_Position"].transform("max")
-    kept = kept[DB_COLUMNS]
+    kept = kept.reindex(columns=DB_COLUMNS)
 
     if len(legacy):
         os.makedirs(ARCHIVE_DIR, exist_ok=True)
