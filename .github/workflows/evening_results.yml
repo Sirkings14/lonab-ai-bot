@@ -2,12 +2,13 @@ name: Evening LONAB Results Scoring
 
 on:
   schedule:
-    # LONAB posts results anywhere from ~13:00 to ~20:30 Burkina time
-    # (UTC+0). Two later runs so a late posting is still caught; the script
-    # is idempotent, so the second run does nothing if the first succeeded.
     - cron: '30 21 * * *'
     - cron: '30 23 * * *'
   workflow_dispatch:
+
+concurrency:
+  group: lonab-repo-writes
+  cancel-in-progress: false
 
 permissions:
   contents: write
