@@ -1,9 +1,11 @@
 name: Evaluate Model (manual)
 
-# Run this whenever you want an honest check of the model against the odds.
-# It saves a plain-text report into the repo (reports/backtest_report.txt).
 on:
   workflow_dispatch:
+
+concurrency:
+  group: lonab-repo-writes
+  cancel-in-progress: false
 
 permissions:
   contents: write
@@ -30,6 +32,7 @@ jobs:
         run: |
           mkdir -p reports
           python backtest.py 2>&1 | tee reports/backtest_report.txt
+          python assessment.py 2>&1 | tee -a reports/backtest_report.txt
 
       - name: Save report
         run: |
