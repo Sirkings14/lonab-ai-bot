@@ -46,7 +46,8 @@ ARCHIVE_DIR = "archive"
 CACHE_DIR = "backfill_cache"
 HEADERS = {"User-Agent": "Mozilla/5.0"}
 
-DB_COLUMNS = FEATURE_COLS + BENTER_COLS + ["Race_Date", "Positions_Known", "Finish_Position", "Is_Winner"]
+EXTRA_COLS = ["Num", "Perf", "Odds", "Odds2", "Driver", "Trainer", "Horse"]   # kept so form/odds/identity can be backtested
+DB_COLUMNS = FEATURE_COLS + BENTER_COLS + ["Race_Date", "Positions_Known", "Finish_Position", "Is_Winner"] + EXTRA_COLS
 
 # Filename variants actually seen on lonab.bf for program PDFs. LONAB is not
 # consistent (hyphen vs underscore, a missing "B", a missing "DU"), which is
@@ -279,7 +280,7 @@ def label_races(program_texts, recaps, skip_dates=()):
         df["Is_Winner"] = (df["Finish_Position"] > 0).astype(int)
         df["Positions_Known"] = len(arrival)
         df["Race_Date"] = date_key
-        frames.append(df[DB_COLUMNS])
+        frames.append(df.reindex(columns=DB_COLUMNS))
     out = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(columns=DB_COLUMNS)
     return out, skipped
 
