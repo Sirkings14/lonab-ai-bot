@@ -2,18 +2,21 @@ name: Backfill LONAB Historical Race Database
 
 on:
   schedule:
-    # Weekly incremental backfill (adds newly-recapped races)
     - cron: '0 6 * * 1'
   workflow_dispatch:
     inputs:
       rebuild:
-        description: 'ONE-TIME clean rebuild of the whole database from source documents (archives old rows, keeps a safety net). Leave false for a normal backfill.'
+        description: 'ONE-TIME clean rebuild of the whole database from source documents. Leave false for a normal backfill.'
         type: boolean
         default: false
       days_back:
         description: 'How many days back to look (60 is plenty for a normal backfill; use 400 for a rebuild)'
         default: '60'
         required: false
+
+concurrency:
+  group: lonab-repo-writes
+  cancel-in-progress: false
 
 permissions:
   contents: write
