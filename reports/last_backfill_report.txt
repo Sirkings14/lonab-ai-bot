@@ -1,29 +1,5 @@
 Listing pages gave 58 programs.
-Probed 344 dates by filename; now 379 programs, 387 dates with an embedded recap.
-Skipped 25 race(s):
-  02-08-2026: no program fetched for that date
-  03-01-2026: no program fetched for that date
-  04-01-2026: no program fetched for that date
-  05-05-2026: no program fetched for that date
-  05-11-2025: no program fetched for that date
-  06-05-2026: no program fetched for that date
-  07-05-2026: no program fetched for that date
-  09-04-2026: no program fetched for that date
-  09-09-2026: no program fetched for that date
-  10-03-2026: no program fetched for that date
-  11-06-2026: no program fetched for that date
-  11-07-2026: no program fetched for that date
-  12-05-2026: no program fetched for that date
-  14-04-2026: program found but could not be parsed (discipline=PLAT, CONCURRENTS=16, rows matched=0, scratched=0, missing=['01', '02', '03', '04', '05', '06', '07', '08'], UNMATCHED ROWS: [01 PROFUMO DI IENA C. DEMURO M. GUARNIERI LA. MORARI F.4 7 61.KG 1.2.6.0.5 71.434 8/1 6/1; 02 OZAN A. LEMAITRE G. DOLEUZE C. STEPHENSON H.8 1 61.KG 0.0.9.4.1 188.760 21/1 24/1; 03 FOU FURIEUX A. MADAMET N. CAULLERY D. R. LODGE/B.L.JONES M.5 6 60.KG 9.8.1.2.4 134.270 23/1 22/1])
-  16-02-2025: no program fetched for that date
-  16-10-2025: no program fetched for that date
-  17-06-2026: no program fetched for that date
-  18-10-2025: no program fetched for that date
-  19-04-2026: no program fetched for that date
+Probed 4 dates by filename; now 61 programs, 63 dates with an embedded recap.
+Skipped 1 race(s):
   19-10-2026: no program fetched for that date
-  22-02-2026: no program fetched for that date
-  24-11-2025: no program fetched for that date
-  28-05-2026: no program fetched for that date
-  28-12-2025: no program fetched for that date
-  29-11-2025: recaps disagree early or have too few positions: [['15', '13', '71', '15'], ['15', '13', '71']]
-Added 728 rows from 48 races. Database: 6082 rows.
+Added 17 rows from 1 races. Database: 6099 rows.
